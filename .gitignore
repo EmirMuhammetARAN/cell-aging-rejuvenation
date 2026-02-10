@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual Environment
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data
+data/raw/
+data/processed/
+*.jpg
+*.png
+*.tif
+*.tiff
+
+# Model checkpoints
+outputs/checkpoints/*.pt
+outputs/checkpoints/*.pth
+outputs/samples/
+
+# Environment
+.env
+
+# OS
+.DS_Store
+Thumbs.db
