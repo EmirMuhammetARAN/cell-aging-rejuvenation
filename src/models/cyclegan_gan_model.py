@@ -2,12 +2,13 @@ import torch
 import torch.nn as nn
 
 class CycleGANModel(nn.Module):
-    def __init__(self, generator, discriminator):
+    def __init__(self, generator, discriminator, device):
         super(CycleGANModel, self).__init__()
         self.G_AB = generator()
         self.G_BA = generator()
         self.D_A = discriminator()
         self.D_B = discriminator()
+        self.device = device
 
         self.criterion_GAN = nn.MSELoss()
         self.criterion_cycle = nn.L1Loss()
@@ -17,8 +18,7 @@ class CycleGANModel(nn.Module):
         self.optimizer_D_A = torch.optim.Adam(self.D_A.parameters(), lr=0.0002, betas=(0.5, 0.999))
         self.optimizer_D_B = torch.optim.Adam(self.D_B.parameters(), lr=0.0002, betas=(0.5, 0.999))
 
-    def set_input(self,input,device):
-        self.device = device
+    def set_input(self,input):
         self.real_A = input['A'].to(self.device)
         self.real_B = input['B'].to(self.device)
     
@@ -58,7 +58,7 @@ class CycleGANModel(nn.Module):
         return loss_D
     
     def train_step(self,input):
-        self.set_input(input,self.device)
+        self.set_input(input)
         self.forward()
 
         for param in self.D_A.parameters():
@@ -82,3 +82,5 @@ class CycleGANModel(nn.Module):
         self.optimizer_D_B.zero_grad()
         loss_D_B = self.backward_D(self.D_B, self.real_B, self.fake_B)
         self.optimizer_D_B.step()
+
+        return loss_D_A, loss_D_B
