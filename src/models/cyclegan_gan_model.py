@@ -43,7 +43,7 @@ class CycleGANModel(nn.Module):
 
         loss_G = loss_G_AB + loss_G_BA + loss_cycle_A + loss_cycle_B + loss_identity_A + loss_identity_B
 
-        loss_G.backward()
+        return loss_G
 
     def backward_D(self,D,real,fake):
         pred_real = D(real)
@@ -53,34 +53,43 @@ class CycleGANModel(nn.Module):
         loss_D_fake = self.criterion_GAN(pred_fake, torch.zeros_like(pred_fake))
 
         loss_D = (loss_D_real + loss_D_fake) * 0.5
-        loss_D.backward()
 
         return loss_D
     
-    def train_step(self,input):
+    def train_step(self,input,scaler):
         self.set_input(input)
-        self.forward()
+
+        with torch.amp.autocast('cuda'):
+            self.forward()
 
         for param in self.D_A.parameters():
             param.requires_grad_(False)
         for param in self.D_B.parameters():
             param.requires_grad_(False)
 
-        self.optimizer_G.zero_grad()
-        self.backward_G()
-        self.optimizer_G.step()
+        self.optimizer_G.zero_grad(set_to_none=True)
+        with torch.amp.autocast('cuda'):
+            loss_G = self.backward_G()
+        scaler.scale(loss_G).backward()
+        scaler.step(self.optimizer_G)
 
         for param in self.D_A.parameters():
             param.requires_grad_(True)
         for param in self.D_B.parameters():
             param.requires_grad_(True)
 
-        self.optimizer_D_A.zero_grad()
-        loss_D_A = self.backward_D(self.D_A, self.real_A, self.fake_A)
-        self.optimizer_D_A.step()
+        self.optimizer_D_A.zero_grad(set_to_none=True)
+        with torch.amp.autocast('cuda'):
+            loss_D_A = self.backward_D(self.D_A, self.real_A, self.fake_A)
+        scaler.scale(loss_D_A).backward()
+        scaler.step(self.optimizer_D_A)
 
-        self.optimizer_D_B.zero_grad()
-        loss_D_B = self.backward_D(self.D_B, self.real_B, self.fake_B)
-        self.optimizer_D_B.step()
+        self.optimizer_D_B.zero_grad(set_to_none=True)
+        with torch.amp.autocast('cuda'):
+            loss_D_B = self.backward_D(self.D_B, self.real_B, self.fake_B)
+        scaler.scale(loss_D_B).backward()
+        scaler.step(self.optimizer_D_B)
 
-        return loss_D_A, loss_D_B
+        scaler.update()
+
+        return loss_G, loss_D_A, loss_D_B
