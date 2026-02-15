@@ -28,7 +28,7 @@ if __name__ == "__main__":
     NUM_EPOCHS = 50
     CHECKPOINT_DIR = os.path.join(parent_dir, 'checkpoints')
     START_EPOCH = 0
-    RESUME_EPOCH = 20
+    RESUME_EPOCH = 0
     RESUME_PATH = os.path.join(CHECKPOINT_DIR, f'cyclegan_epoch_{RESUME_EPOCH}.pth') if RESUME_EPOCH > 0 else None
     epoch_loss_G = []
     epoch_loss_D_A = []
@@ -39,12 +39,18 @@ if __name__ == "__main__":
 
 
     # Data loading and preprocessing
-    transform = transforms.Compose([
+    transform_train = transforms.Compose([
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomVerticalFlip(),
         transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
-
-    dataset = DatasetMaker(young_path=YOUNG_PATH, senescent_path=SENESCENT_PATH, transform=transform)
+    transform_test = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    ])
+    
+    dataset = DatasetMaker(young_path=YOUNG_PATH, senescent_path=SENESCENT_PATH, transform=transform_train)
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True,persistent_workers=True)
 
 
@@ -61,7 +67,6 @@ if __name__ == "__main__":
         model.load_state_dict(torch.load(RESUME_PATH, map_location=DEVICE))
         print('Checkpoint loaded successfully.')
         START_EPOCH = RESUME_EPOCH
-        best_loss_G = 2.1062
     else:
         print('No checkpoint found, starting from scratch.')
 
@@ -109,10 +114,12 @@ if __name__ == "__main__":
 
         if avg_loss_G < best_loss_G:
             best_loss_G = avg_loss_G
-            torch.save(model._orig_mod.state_dict(), os.path.join(CHECKPOINT_DIR, 'cyclegan_best.pth'))
+            torch.save(model._orig_mod.state_dict(), os.path.join(CHECKPOINT_DIR, 'cyclegan_best_v2.pth'))
+            print(f'New best model saved with Loss G: {best_loss_G:.4f}')
         
         if (epoch + 1) % 10 == 0:
-           torch.save(model._orig_mod.state_dict(), os.path.join(CHECKPOINT_DIR, f'cyclegan_epoch_{epoch+1}.pth'))
+           torch.save(model._orig_mod.state_dict(), os.path.join(CHECKPOINT_DIR, f'cyclegan_v2_epoch_{epoch+1}.pth'))
+           print(f'Checkpoint saved for epoch {epoch+1}.')
         
         epoch_loss_G = []
         epoch_loss_D_A = []
@@ -120,7 +127,7 @@ if __name__ == "__main__":
         if (epoch + 1) % 10 == 0:
             model.eval()
             test_img = Image.open(os.path.join(parent_dir, 'data', 'processed', 'test', 'young', os.listdir(os.path.join(parent_dir, 'data', 'processed', 'test', 'young'))[0])).convert('RGB')
-            test_tensor = transform(test_img).unsqueeze(0).to(DEVICE)
+            test_tensor = transform_test(test_img).unsqueeze(0).to(DEVICE)
             with torch.no_grad():
                 with torch.amp.autocast('cuda'):
                     fake_senescent = model._orig_mod.G_AB(test_tensor)
