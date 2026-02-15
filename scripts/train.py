@@ -12,6 +12,8 @@ from src.models.discriminator import Discriminator
 from src.models.cyclegan_gan_model import CycleGANModel
 from tqdm import tqdm
 from PIL import Image
+
+
 torch.backends.cudnn.benchmark = True         
 torch.backends.cuda.matmul.allow_tf32 = True   
 torch.backends.cudnn.allow_tf32 = True 
