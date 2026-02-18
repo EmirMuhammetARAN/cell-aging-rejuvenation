@@ -5,10 +5,12 @@ import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 import torch
 import tqdm
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-sys.path.append(parent_dir)
-from src.models.classifier import Classifier
+
+# Get root directory
+current_file = os.path.abspath(__file__)
+root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(current_file))))
+sys.path.insert(0, root_dir)
+from models.classifier.classifier import Classifier
 from torch.utils.data import random_split  
 
 torch.backends.cudnn.benchmark = True         
@@ -17,7 +19,7 @@ torch.backends.cudnn.allow_tf32 = True
 torch.set_float32_matmul_precision('medium')
 
 if __name__ == "__main__":
-    PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    PARENT_DIR = root_dir
     TRAIN_PATH = os.path.join(PARENT_DIR, 'data/processed/train')
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
     NUM_EPOCHS = 20

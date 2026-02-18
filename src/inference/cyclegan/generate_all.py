@@ -3,20 +3,23 @@ import os
 import sys
 from PIL import Image
 import torchvision.transforms as transforms
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-sys.path.append(parent_dir)
-from src.models.cyclegan_gan_model import CycleGANModel
-from src.models.generator_resnet import GeneratorResNet
-from src.models.discriminator import Discriminator
+
+# Get root directory
+current_file = os.path.abspath(__file__)
+root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(current_file))))
+sys.path.insert(0, root_dir)
+
+from models.cyclegan.cyclegan_gan_model import CycleGANModel
+from models.cyclegan.generator_resnet import GeneratorResNet
+from models.cyclegan.discriminator import Discriminator
 
 
 
-MODEL_NAME = 'v2_epoch_50'
+MODEL_NAME = 'v1_epoch_70' 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-CHECKPOINT = os.path.join(parent_dir, 'checkpoints', f'cyclegan_{MODEL_NAME}.pth')
-TEST_DIR = os.path.join(parent_dir, 'data', 'processed', 'test', 'young')
-OUTPUT_DIR = os.path.join(parent_dir, 'results', f'generated_{MODEL_NAME}')
+CHECKPOINT = os.path.join(root_dir, 'checkpoints', f'cyclegan_{MODEL_NAME}.pth')
+TEST_DIR = os.path.join(root_dir, 'data', 'processed', 'test', 'young')
+OUTPUT_DIR = os.path.join(root_dir, 'results', 'generated', MODEL_NAME,'aging')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
@@ -42,4 +45,4 @@ for img_name in os.listdir(TEST_DIR):
     save_img = transforms.ToPILImage()(fake_img)
     save_img.save(os.path.join(OUTPUT_DIR, img_name))
     
-print(f'{len(os.listdir(OUTPUT_DIR))} resim üretildi → results/generated_{MODEL_NAME}/')
+print(f'{len(os.listdir(OUTPUT_DIR))} resim üretildi → results/generated/{MODEL_NAME}/')

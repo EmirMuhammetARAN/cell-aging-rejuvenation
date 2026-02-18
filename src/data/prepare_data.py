@@ -1,15 +1,16 @@
 import os
 import sys
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-sys.path.append(parent_dir)
+# Get root directory
+current_file = os.path.abspath(__file__)
+root_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
+sys.path.insert(0, root_dir)
 
 from src.data.cropper import Cropper
 from src.data.parser import Parser
 
-RAW_PATH = os.path.join(parent_dir, "data", "raw")
-PROCESSED_PATH = os.path.join(parent_dir, "data", "processed")
+RAW_PATH = os.path.join(root_dir, "data", "raw")
+PROCESSED_PATH = os.path.join(root_dir, "data", "processed")
 CROP_SIZE = 512
 
 SUBSETS = ["train", "val", "test"]

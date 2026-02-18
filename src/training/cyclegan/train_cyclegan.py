@@ -3,13 +3,16 @@ import sys
 import torch
 from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-sys.path.append(parent_dir)
+
+# Get root directory
+current_file = os.path.abspath(__file__)
+root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(current_file))))
+sys.path.insert(0, root_dir)
+
 from src.data.dataset_maker import DatasetMaker
-from src.models.generator_resnet import GeneratorResNet
-from src.models.discriminator import Discriminator
-from src.models.cyclegan_gan_model import CycleGANModel
+from models.cyclegan.generator_resnet import GeneratorResNet
+from models.cyclegan.discriminator import Discriminator
+from models.cyclegan.cyclegan_gan_model import CycleGANModel
 from tqdm import tqdm
 from PIL import Image
 
@@ -23,15 +26,16 @@ torch.set_float32_matmul_precision('medium')
 
 if __name__ == "__main__":
     # Configuration
-    YOUNG_PATH = os.path.join(parent_dir, 'data', 'processed','train','young')
-    SENESCENT_PATH = os.path.join(parent_dir, 'data', 'processed', 'train', 'senescent')
+    YOUNG_PATH = os.path.join(root_dir, 'data', 'processed','train','young')
+    SENESCENT_PATH = os.path.join(root_dir, 'data', 'processed', 'train', 'senescent')
     BATCH_SIZE = 1
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-    NUM_EPOCHS = 50
-    CHECKPOINT_DIR = os.path.join(parent_dir, 'checkpoints')
+    NUM_EPOCHS = 100
+    CHECKPOINT_DIR = os.path.join(root_dir, 'checkpoints')
     START_EPOCH = 0
-    RESUME_EPOCH = 0
-    RESUME_PATH = os.path.join(CHECKPOINT_DIR, f'cyclegan_epoch_{RESUME_EPOCH}.pth') if RESUME_EPOCH > 0 else None
+    RESUME_EPOCH = 50
+    RESUME_PATH = os.path.join(CHECKPOINT_DIR, f'cyclegan_v1_epoch_{RESUME_EPOCH}.pth') if RESUME_EPOCH > 0 else None
+    parent_dir = root_dir  # For compatibility with rest of code
     epoch_loss_G = []
     epoch_loss_D_A = []
     epoch_loss_D_B = []
@@ -42,8 +46,6 @@ if __name__ == "__main__":
 
     # Data loading and preprocessing
     transform_train = transforms.Compose([
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomVerticalFlip(),
         transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
@@ -63,7 +65,7 @@ if __name__ == "__main__":
     model.to(DEVICE,memory_format=torch.channels_last)
 
 
-    best_loss_G = float('inf')
+    best_loss_G = 2.56
     
     if RESUME_PATH and os.path.isfile(RESUME_PATH):
         model.load_state_dict(torch.load(RESUME_PATH, map_location=DEVICE))
@@ -116,11 +118,11 @@ if __name__ == "__main__":
 
         if avg_loss_G < best_loss_G:
             best_loss_G = avg_loss_G
-            torch.save(model._orig_mod.state_dict(), os.path.join(CHECKPOINT_DIR, 'cyclegan_best_v2.pth'))
+            torch.save(model._orig_mod.state_dict(), os.path.join(CHECKPOINT_DIR, 'cyclegan_best_v1.pth'))
             print(f'New best model saved with Loss G: {best_loss_G:.4f}')
         
         if (epoch + 1) % 10 == 0:
-           torch.save(model._orig_mod.state_dict(), os.path.join(CHECKPOINT_DIR, f'cyclegan_v2_epoch_{epoch+1}.pth'))
+           torch.save(model._orig_mod.state_dict(), os.path.join(CHECKPOINT_DIR, f'cyclegan_v1_epoch_{epoch+1}.pth'))
            print(f'Checkpoint saved for epoch {epoch+1}.')
         
         epoch_loss_G = []
