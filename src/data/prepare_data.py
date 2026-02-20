@@ -10,7 +10,7 @@ from src.data.cropper import Cropper
 from src.data.parser import Parser
 
 RAW_PATH = os.path.join(root_dir, "data", "raw")
-PROCESSED_PATH = os.path.join(root_dir, "data", "processed")
+PROCESSED_PATH = os.path.join(root_dir, "data", "processed_v2")
 CROP_SIZE = 512
 
 SUBSETS = ["train", "val", "test"]
