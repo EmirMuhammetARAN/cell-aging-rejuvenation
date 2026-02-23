@@ -10,7 +10,7 @@ sys.path.insert(0, root_dir)
 from models.classifier.classifier import Classifier
 from PIL import Image
 
-RESULTS_PATH_NAME = 'generated/ldm_test/rejuvenation'
+RESULTS_PATH_NAME = 'generated/ldm_test/aging'
 RESULTS_PATH = os.path.join(root_dir, f'results/{RESULTS_PATH_NAME}')  
 CORRECT_OF_RESULTS = 0
 IMG_COUNT = 0
@@ -33,7 +33,7 @@ for img_name in os.listdir(RESULTS_PATH):
         img = transform(img).unsqueeze(0).to('cuda')
         prediction = model(img)
         IMG_COUNT += 1
-        if prediction.argmax(dim=1).item() == 1:
+        if prediction.argmax(dim=1).item() == 0:
             CORRECT_OF_RESULTS += 1
 
 print(f'Generated Accuracy: {CORRECT_OF_RESULTS/IMG_COUNT:.4f}')

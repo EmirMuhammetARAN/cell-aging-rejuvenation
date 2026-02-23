@@ -112,13 +112,14 @@ if __name__ == "__main__":
             avg_val_loss = val_loss_sum / val_steps
             print(f"Epoch {epoch+1} | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
 
+            # --- Sıfırdan üretim (CFG + DDIM) ---
             model.unet.eval()
             use_ema = (epoch + 1) >= 10 
             young_labels = torch.zeros(4, dtype=torch.long, device=DEVICE)
             senescent_labels = torch.ones(4, dtype=torch.long, device=DEVICE)
 
-            young_samples = model.sample(num_samples=4, device=DEVICE, labels=young_labels, use_ema=use_ema)
-            senescent_samples = model.sample(num_samples=4, device=DEVICE, labels=senescent_labels, use_ema=use_ema)
+            young_samples = model.sample(num_samples=4, device=DEVICE, labels=young_labels, use_ema=use_ema, guidance_scale=3.0)
+            senescent_samples = model.sample(num_samples=4, device=DEVICE, labels=senescent_labels, use_ema=use_ema, guidance_scale=3.0)
             
             save_path_young = os.path.join(root_dir, 'results', 'generated', 'ldm', f'epoch_{epoch+1}_young.png')
             save_path_senes = os.path.join(root_dir, 'results', 'generated', 'ldm', f'epoch_{epoch+1}_senescent.png')
@@ -138,10 +139,10 @@ if __name__ == "__main__":
 
                 if young_img is not None and senescent_img is not None:
                     target_senes = torch.ones(1, dtype=torch.long, device=DEVICE)
-                    translated_senes = model.translate(young_img, target_senes, strength=0.6, use_ema=use_ema)
+                    translated_senes = model.translate(young_img, target_senes, strength=0.6, use_ema=use_ema, guidance_scale=3.0)
                     
                     target_young = torch.zeros(1, dtype=torch.long, device=DEVICE)
-                    translated_young = model.translate(senescent_img, target_young, strength=0.6, use_ema=use_ema)
+                    translated_young = model.translate(senescent_img, target_young, strength=0.6, use_ema=use_ema, guidance_scale=3.0)
                     
                     young_orig_vis = (young_img.clamp(-1, 1) + 1) / 2
                     senes_orig_vis = (senescent_img.clamp(-1, 1) + 1) / 2
@@ -166,7 +167,7 @@ if __name__ == "__main__":
                     'ema_unet_state_dict': model.ema_unet.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
                     'val_loss': avg_val_loss,
-                }, os.path.join(root_dir, 'checkpoints', 'ldm', 'best_model.pt'))
+                }, os.path.join(root_dir, 'checkpoints', 'ldm', 'best_model_v2.pt'))
                 print(f"  ✓ Best model saved (val_loss: {avg_val_loss:.4f})")
         else:
             print(f"Epoch {epoch+1} | Train Loss: {avg_train_loss:.4f}")

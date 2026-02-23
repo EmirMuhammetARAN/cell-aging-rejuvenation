@@ -1,10 +1,10 @@
 import torch
 import torch.nn as nn
-from diffusers import UNet2DModel, AutoencoderKL, DDPMScheduler
+from diffusers import UNet2DModel, AutoencoderKL, DDPMScheduler, DDIMScheduler
 from copy import deepcopy
 
 class CellLDM(nn.Module):
-    def __init__(self, num_classes=2):
+    def __init__(self, num_classes=2, cfg_drop_prob=0.15):
         super().__init__()
         
         self.vae = AutoencoderKL.from_pretrained(
@@ -12,6 +12,7 @@ class CellLDM(nn.Module):
         )
         
         self.num_classes = num_classes
+        self.cfg_drop_prob = cfg_drop_prob
         
         self.unet = UNet2DModel(
             sample_size=64,
@@ -33,10 +34,10 @@ class CellLDM(nn.Module):
             ),
             attention_head_dim=8,
             norm_num_groups=32,
-            num_class_embeds=num_classes,
+            num_class_embeds=num_classes + 1,  # +1 for unconditional (drop) class
         )
         
-        self.scheduler = DDPMScheduler(
+        self.train_scheduler = DDPMScheduler(
             num_train_timesteps=1000,
             beta_schedule="scaled_linear",
             beta_start=0.00085,
@@ -44,11 +45,20 @@ class CellLDM(nn.Module):
             prediction_type="epsilon",
         )
         
+        self.inference_scheduler = DDIMScheduler(
+            num_train_timesteps=1000,
+            beta_schedule="scaled_linear",
+            beta_start=0.00085,
+            beta_end=0.012,
+            prediction_type="epsilon",
+            clip_sample=False,
+        )
+        
         self.vae.requires_grad_(False)
         self.scaling_factor = 0.18215
         
         self.ema_unet = None
-        self.ema_decay = 0.995
+        self.ema_decay = 0.999
     
     def init_ema(self):
         self.ema_unet = deepcopy(self.unet)
@@ -77,52 +87,87 @@ class CellLDM(nn.Module):
     def forward(self, images, labels=None):
         latents = self.encode(images)
         noise = torch.randn_like(latents)
-        timesteps = torch.randint(0, self.scheduler.config.num_train_timesteps, 
+        timesteps = torch.randint(0, self.train_scheduler.config.num_train_timesteps, 
                                    (latents.shape[0],), device=latents.device).long()
-        noisy_latents = self.scheduler.add_noise(latents, noise, timesteps)
+        noisy_latents = self.train_scheduler.add_noise(latents, noise, timesteps)
+        
+        # CFG: %15 olasılıkla label'ı unconditional yap
+        if labels is not None and self.training:
+            drop_mask = torch.rand(labels.shape[0], device=labels.device) < self.cfg_drop_prob
+            labels = labels.clone()
+            labels[drop_mask] = self.num_classes  # unconditional class index
         
         noise_pred = self.unet(noisy_latents, timesteps, class_labels=labels).sample
         loss = nn.functional.mse_loss(noise_pred, noise)
         return loss
 
     @torch.no_grad()
-    def sample(self, num_samples=4, device='cuda', labels=None, use_ema=True):
+    def sample(self, num_samples=4, device='cuda', labels=None, use_ema=True, 
+               guidance_scale=3.0, num_steps=50):
         unet = self.ema_unet if (use_ema and self.ema_unet is not None) else self.unet
         unet.eval()
         
         latents = torch.randn(num_samples, 4, 64, 64, device=device)
         
-        self.scheduler.set_timesteps(100)
+        self.inference_scheduler.set_timesteps(num_steps)
         
-        for t in self.scheduler.timesteps:
+        # Unconditional label (CFG için)
+        uncond_labels = torch.full((num_samples,), self.num_classes, dtype=torch.long, device=device)
+        
+        for t in self.inference_scheduler.timesteps:
             t_batch = t.unsqueeze(0).repeat(num_samples).to(device)
-            noise_pred = unet(latents, t_batch, class_labels=labels).sample
-            latents = self.scheduler.step(noise_pred, t, latents).prev_sample
+            
+            if guidance_scale > 1.0 and labels is not None:
+                # CFG: conditional + unconditional forward pass
+                noise_pred_cond = unet(latents, t_batch, class_labels=labels).sample
+                noise_pred_uncond = unet(latents, t_batch, class_labels=uncond_labels).sample
+                noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
+            else:
+                noise_pred = unet(latents, t_batch, class_labels=labels).sample
+            
+            latents = self.inference_scheduler.step(noise_pred, t, latents).prev_sample
         
         images = self.decode(latents)
         images = (images.clamp(-1, 1) + 1) / 2
         return images
 
     @torch.no_grad()
-    def translate(self, images, target_labels, strength=0.6, num_steps=100, use_ema=True):
+    def translate(self, images, target_labels, strength=0.6, num_steps=50, 
+                  use_ema=True, guidance_scale=3.0):
+        """
+        SDEdit-style translation: kaynak görüntüyü hedef sınıfa dönüştürür.
+        """
         unet = self.ema_unet if (use_ema and self.ema_unet is not None) else self.unet
         unet.eval()
         
         latents = self.encode(images)
         
-        self.scheduler.set_timesteps(num_steps)
-        timesteps = self.scheduler.timesteps
+        self.inference_scheduler.set_timesteps(num_steps)
+        timesteps = self.inference_scheduler.timesteps
         
+        # strength'e göre hangi timestep'ten başlanacağını hesapla
         start_step = int(len(timesteps) * (1 - strength))
         t_start = timesteps[start_step]
         
+        # Latent'e o seviyeye kadar noise ekle
         noise = torch.randn_like(latents)
-        noisy_latents = self.scheduler.add_noise(latents, noise, t_start)
+        noisy_latents = self.inference_scheduler.add_noise(latents, noise, t_start)
         
+        # Unconditional label (CFG için)
+        uncond_labels = torch.full((images.shape[0],), self.num_classes, dtype=torch.long, device=images.device)
+        
+        # Hedef label ile geri denoise et
         for t in timesteps[start_step:]:
             t_batch = t.unsqueeze(0).repeat(images.shape[0]).to(images.device)
-            noise_pred = unet(noisy_latents, t_batch, class_labels=target_labels).sample
-            noisy_latents = self.scheduler.step(noise_pred, t, noisy_latents).prev_sample
+            
+            if guidance_scale > 1.0:
+                noise_pred_cond = unet(noisy_latents, t_batch, class_labels=target_labels).sample
+                noise_pred_uncond = unet(noisy_latents, t_batch, class_labels=uncond_labels).sample
+                noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
+            else:
+                noise_pred = unet(noisy_latents, t_batch, class_labels=target_labels).sample
+            
+            noisy_latents = self.inference_scheduler.step(noise_pred, t, noisy_latents).prev_sample
         
         result = self.decode(noisy_latents)
         result = (result.clamp(-1, 1) + 1) / 2
