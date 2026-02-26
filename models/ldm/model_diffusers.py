@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
-from diffusers import UNet2DModel, AutoencoderKL, DDPMScheduler, DDIMScheduler
+from diffusers import Unet2DConditionModel, AutoencoderKL, DDPMScheduler, DDIMScheduler
 from copy import deepcopy
 import torch.nn.functional as F
+from peft import get_peft_model, LoraConfig
 
 class CellLDM(nn.Module):
     def __init__(self, num_classes=2, cfg_drop_prob=0.15):
@@ -15,27 +16,9 @@ class CellLDM(nn.Module):
         self.num_classes = num_classes
         self.cfg_drop_prob = cfg_drop_prob
         
-        self.unet = UNet2DModel(
-            sample_size=64,
-            in_channels=4,
-            out_channels=4,
-            layers_per_block=2,
-            block_out_channels=(160, 320, 512, 512),
-            down_block_types=(
-                "DownBlock2D",
-                "AttnDownBlock2D",
-                "AttnDownBlock2D",
-                "AttnDownBlock2D",
-            ),
-            up_block_types=(
-                "AttnUpBlock2D",
-                "AttnUpBlock2D",
-                "AttnUpBlock2D",
-                "UpBlock2D",
-            ),
-            attention_head_dim=8,
-            norm_num_groups=32,
-            num_class_embeds=num_classes + 1,   
+        self.unet = Unet2DConditionModel.from_pretrained(
+            "runwayml/stable-diffusion-v1-5",
+            subfolder="unet",
         )
         
         self.train_scheduler = DDPMScheduler(
@@ -45,7 +28,20 @@ class CellLDM(nn.Module):
             beta_end=0.012,
             prediction_type="epsilon",
         )
+        self.class_embed = nn.Sequential(
+            nn.Embedding(num_classes + 1, 768)
+        )
         
+        self.loraconfig = LoraConfig(
+            r=64,
+            lora_alpha=64,
+            init_lora_weights="gaussian",
+            target_modules=["to_k", "to_v", "to_q", "to_out.0"],
+        )
+
+
+        self.unet = get_peft_model(self.unet, self.loraconfig)
+
         self.inference_scheduler = DDIMScheduler(
             num_train_timesteps=1000,
             beta_schedule="scaled_linear",
@@ -78,7 +74,7 @@ class CellLDM(nn.Module):
         latent_dist = self.vae.encode(x).latent_dist
         latents = latent_dist.sample() * self.scaling_factor
         return latents
-
+    @torch.no_grad()
     def decode(self, latents):
         latents = latents / self.scaling_factor
         image = self.vae.decode(latents).sample
@@ -95,8 +91,9 @@ class CellLDM(nn.Module):
             drop_mask = torch.rand(labels.shape[0], device=labels.device) < self.cfg_drop_prob
             labels = labels.clone()
             labels[drop_mask] = self.num_classes 
-        
-        noise_pred = self.unet(noisy_latents, timesteps, class_labels=labels).sample
+
+        class_emb = self.class_embed(labels).unsqueeze(1)
+        noise_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states=class_emb).sample
         loss = F.mse_loss(noise_pred, noise)
         return loss
 
@@ -116,11 +113,18 @@ class CellLDM(nn.Module):
             t_batch = t.unsqueeze(0).repeat(num_samples).to(device)
             
             if guidance_scale > 1.0 and labels is not None:
-                noise_pred_cond = unet(latents, t_batch, class_labels=labels).sample
-                noise_pred_uncond = unet(latents, t_batch, class_labels=uncond_labels).sample
+                class_emb = self.class_embed(labels)
+                class_emb = class_emb.unsqueeze(1)
+                noise_pred_cond = unet(latents, t_batch, encoder_hidden_states=class_emb).sample
+
+                uncond_class_emb = self.class_embed(uncond_labels)
+                uncond_class_emb = uncond_class_emb.unsqueeze(1)
+                noise_pred_uncond = unet(latents, t_batch, encoder_hidden_states=uncond_class_emb).sample
                 noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
             else:
-                noise_pred = unet(latents, t_batch, class_labels=labels).sample
+                class_emb = self.class_embed(labels)
+                class_emb = class_emb.unsqueeze(1)
+                noise_pred = unet(latents, t_batch, encoder_hidden_states=class_emb).sample
             
             latents = self.inference_scheduler.step(noise_pred, t, latents).prev_sample
         
@@ -151,11 +155,18 @@ class CellLDM(nn.Module):
             t_batch = t.unsqueeze(0).repeat(images.shape[0]).to(images.device)
             
             if guidance_scale > 1.0:
-                noise_pred_cond = unet(noisy_latents, t_batch, class_labels=target_labels).sample
-                noise_pred_uncond = unet(noisy_latents, t_batch, class_labels=uncond_labels).sample
+                target_class_emb = self.class_embed(target_labels)
+                target_class_emb = target_class_emb.unsqueeze(1)
+                noise_pred_cond = unet(noisy_latents, t_batch, encoder_hidden_states=target_class_emb).sample
+
+                uncond_class_emb = self.class_embed(uncond_labels)
+                uncond_class_emb = uncond_class_emb.unsqueeze(1)
+                noise_pred_uncond = unet(noisy_latents, t_batch, encoder_hidden_states=uncond_class_emb).sample
                 noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
             else:
-                noise_pred = unet(noisy_latents, t_batch, class_labels=target_labels).sample
+                target_class_emb = self.class_embed(target_labels)
+                target_class_emb = target_class_emb.unsqueeze(1)
+                noise_pred = unet(noisy_latents, t_batch, encoder_hidden_states=target_class_emb).sample
             
             noisy_latents = self.inference_scheduler.step(noise_pred, t, noisy_latents).prev_sample
         

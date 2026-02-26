@@ -32,10 +32,12 @@ transform = transforms.Compose([
 model = CellLDM(num_classes=2)
 model.to('cuda', memory_format=torch.channels_last)
 model.vae.to(memory_format=torch.channels_last)
-model_checkpoint = torch.load(os.path.join(root_dir, 'checkpoints', 'ldm', 'best_model_v2.pt'))
+model_checkpoint = torch.load(os.path.join(root_dir, 'checkpoints', 'ldm', 'best_model_v2_ft.pt'))
 model.unet.load_state_dict(model_checkpoint['unet_state_dict'])
 model.init_ema()
 model.ema_unet.load_state_dict(model_checkpoint['ema_unet_state_dict'])
+if 'vae_decoder_state_dict' in model_checkpoint:
+    model.vae.decoder.load_state_dict(model_checkpoint['vae_decoder_state_dict'])
 model.eval()
 
 for img in os.listdir(TEST_YOUNG_DIR):

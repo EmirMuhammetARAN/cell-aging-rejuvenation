@@ -23,12 +23,12 @@ torch._dynamo.config.cache_size_limit = 64
 
 if __name__ == "__main__":
 
-    BATCH_SIZE = 4
+    BATCH_SIZE = 2
     VAL_BATCH_SIZE = 1
-    NUM_EPOCHS = 200
+    NUM_EPOCHS = 50
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-    LR = 2e-4
-    GRADIENT_ACCUMULATION_STEPS = 4
+    LR = 5e-5
+    GRADIENT_ACCUMULATION_STEPS = 8
     USE_BFLOAT16 = True
     MAX_GRAD_NORM = 1.0
     VAL_FREQ = 5
@@ -46,22 +46,31 @@ if __name__ == "__main__":
                                 pin_memory=True, persistent_workers=True, prefetch_factor=2)
 
     model = CellLDM(num_classes=2)
-    model.to(DEVICE, memory_format=torch.channels_last)
+    model.to('cuda', memory_format=torch.channels_last)
     model.vae.to(memory_format=torch.channels_last)
-    model.init_ema() 
+    
+    # Resume from epoch 20 checkpoint
+    START_EPOCH = 20
+    model_checkpoint = torch.load(os.path.join(root_dir, 'checkpoints', 'ldm', 'checkpoint_ft_epoch_20.pt'))
+    model.unet.load_state_dict(model_checkpoint['unet_state_dict'])
+    model.init_ema()
+    model.ema_unet.load_state_dict(model_checkpoint['ema_unet_state_dict'])
+    if 'vae_decoder_state_dict' in model_checkpoint:
+        model.vae.decoder.load_state_dict(model_checkpoint['vae_decoder_state_dict'])
+    
 
     optimizer = torch.optim.AdamW([
         {'params': model.unet.parameters(), 'lr': LR},
-        {'params': model.vae.decoder.parameters(), 'lr': LR * 0.1}
+        {'params': model.vae.decoder.parameters(), 'lr': LR * 0.2}
     ], weight_decay=1e-2)
     lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=NUM_EPOCHS, eta_min=1e-6)
 
     os.makedirs(os.path.join(root_dir, 'checkpoints', 'ldm'), exist_ok=True)
     os.makedirs(os.path.join(root_dir, 'results', 'generated', 'ldm'), exist_ok=True)
 
-    best_val_loss = float('inf')
+    best_val_loss = 0.1330  # Best from epoch 5
 
-    for epoch in range(NUM_EPOCHS):
+    for epoch in range(START_EPOCH, NUM_EPOCHS):
         model.unet.train()
         model.vae.decoder.train()
         train_loss_sum = 0.0
@@ -172,7 +181,7 @@ if __name__ == "__main__":
                     'optimizer_state_dict': optimizer.state_dict(),
                     'vae_decoder_state_dict': model.vae.decoder.state_dict(),
                     'val_loss': avg_val_loss,
-                }, os.path.join(root_dir, 'checkpoints', 'ldm', 'best_model_v2.pt'))
+                }, os.path.join(root_dir, 'checkpoints', 'ldm', 'best_model_v2_ft.pt'))
                 print(f"  ✓ Best model saved (val_loss: {avg_val_loss:.4f})")
         else:
             print(f"Epoch {epoch+1} | Train Loss: {avg_train_loss:.4f}")
@@ -184,6 +193,6 @@ if __name__ == "__main__":
                 'ema_unet_state_dict': model.ema_unet.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'vae_decoder_state_dict': model.vae.decoder.state_dict(),
-            }, os.path.join(root_dir, 'checkpoints', 'ldm', f'checkpoint_epoch_{epoch+1}.pt'))
+            }, os.path.join(root_dir, 'checkpoints', 'ldm', f'checkpoint_ft_epoch_{epoch+1}.pt'))
 
     print("Eğitim tamamlandı!")
