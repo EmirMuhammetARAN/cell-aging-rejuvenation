@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from diffusers import Unet2DConditionModel, AutoencoderKL, DDPMScheduler, DDIMScheduler
+from diffusers import UNet2DConditionModel, AutoencoderKL, DDPMScheduler, DDIMScheduler
 from copy import deepcopy
 import torch.nn.functional as F
 from peft import get_peft_model, LoraConfig
@@ -16,7 +16,7 @@ class CellLDM(nn.Module):
         self.num_classes = num_classes
         self.cfg_drop_prob = cfg_drop_prob
         
-        self.unet = Unet2DConditionModel.from_pretrained(
+        self.unet = UNet2DConditionModel.from_pretrained(
             "runwayml/stable-diffusion-v1-5",
             subfolder="unet",
         )
@@ -33,13 +33,12 @@ class CellLDM(nn.Module):
         )
         
         self.loraconfig = LoraConfig(
-            r=64,
-            lora_alpha=64,
+            r=32,
+            lora_alpha=32,
             init_lora_weights="gaussian",
-            target_modules=["to_k", "to_v", "to_q", "to_out.0"],
+            target_modules=["to_q", "to_k", "to_v", "to_out.0"],
         )
-
-
+        self.unet.enable_gradient_checkpointing()
         self.unet = get_peft_model(self.unet, self.loraconfig)
 
         self.inference_scheduler = DDIMScheduler(

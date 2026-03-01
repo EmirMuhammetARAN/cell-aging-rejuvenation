@@ -14,7 +14,7 @@ class LDMDataset(Dataset):
         self.images = []
         self.labels = [] 
         
-        data_dir = os.path.join(root_dir, 'data', 'processed_v2')
+        data_dir = os.path.join(root_dir, 'data', 'processed_v3')
         
         for class_name, label in [('young', 0), ('senescent', 1)]:
             class_dir = os.path.join(data_dir, split, class_name)
