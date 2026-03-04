@@ -22,8 +22,8 @@ transform = transforms.Compose([
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 
-real_young = os.path.join(root_dir, 'data', 'processed_v2', 'test', 'young')
-real_senescent = os.path.join(root_dir, 'data', 'processed_v2', 'test', 'senescent')
+real_young = os.path.join(root_dir, 'data', 'processed_v3', 'test', 'young')
+real_senescent = os.path.join(root_dir, 'data', 'processed_v3', 'test', 'senescent')
 
 tasks = [
     ('aging', 0, real_senescent),              
@@ -32,7 +32,7 @@ tasks = [
     ('random_samples_senescent', 0, real_senescent),  
 ]
 
-ldm_test_dir = os.path.join(root_dir, 'results', 'generated', 'ldm_test')
+ldm_test_dir = os.path.join(root_dir, 'results', 'generated', 'ldm_diffusers_test')
 
 print("=" * 60)
 print("CLASSIFIER ACCURACY")

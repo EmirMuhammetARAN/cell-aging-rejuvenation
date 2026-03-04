@@ -14,8 +14,8 @@ class LDMDataset(Dataset):
         self.images = []
         self.labels = [] 
         
-        data_dir = os.path.join(root_dir, 'data', 'processed_v3')
-        
+        # 1) Labeled data from processed_v2
+        data_dir = os.path.join(root_dir, 'data', 'processed_v2')
         for class_name, label in [('young', 0), ('senescent', 1)]:
             class_dir = os.path.join(data_dir, split, class_name)
             if not os.path.exists(class_dir):
@@ -25,8 +25,19 @@ class LDMDataset(Dataset):
                     self.images.append(os.path.join(class_dir, fname))
                     self.labels.append(label)
         
+        # 2) Unlabeled data (only for training) → label=2 (unconditional)
+        if split == 'train':
+            unlabeled_dir = os.path.join(root_dir, 'data', 'unlabeled_patches')
+            if os.path.exists(unlabeled_dir):
+                for fname in sorted(os.listdir(unlabeled_dir)):
+                    if fname.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff')):
+                        self.images.append(os.path.join(unlabeled_dir, fname))
+                        self.labels.append(2)  # unconditional
+        
+        labeled_count = sum(1 for l in self.labels if l < 2)
+        unlabeled_count = sum(1 for l in self.labels if l == 2)
         print(f"[LDMDataset] {split}: {len(self.images)} images "
-              f"(young={self.labels.count(0)}, senescent={self.labels.count(1)})")
+              f"(young={self.labels.count(0)}, senescent={self.labels.count(1)}, unlabeled={unlabeled_count})")
     
     def __len__(self):
         return len(self.images)
