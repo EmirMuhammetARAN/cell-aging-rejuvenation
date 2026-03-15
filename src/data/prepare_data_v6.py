@@ -1,17 +1,19 @@
 import os
 import sys
 
-# Get root directory
 current_file = os.path.abspath(__file__)
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
 sys.path.insert(0, root_dir)
 
-from src.data.cropper import Cropper
+from src.data.cropper import Cropper        
 from src.data.parser import Parser
 
 RAW_PATH = os.path.join(root_dir, "data", "raw")
-PROCESSED_PATH = os.path.join(root_dir, "data", "processed_v4")
+PROCESSED_PATH = os.path.join(root_dir, "data", "processed_v6")
 CROP_SIZE = 512
+
+# AGA DİKKAT: Eski target_cell_ratio yerine yeni sistemdeki padding değerimizi girdik
+EDGE_PADDING = 10 
 
 SUBSETS = ["train", "val", "test"]
 
@@ -24,11 +26,17 @@ for subset in SUBSETS:
     if os.path.exists(json_path):
         parser = Parser(json_path)
         parsed_cells = parser.parse()
-        print(f"Parsed {len(parsed_cells)} cells from {subset}")
+        print(f"\n[{subset}] {len(parsed_cells)} hücre parse edildi")
 
-        cropper = Cropper(subset_raw_path, subset_processed_path, CROP_SIZE)
+        # Cropper'ı yeni parametreyle (edge_padding) çağırıyoruz
+        cropper = Cropper(
+            raw_path=subset_raw_path,
+            processed_path=subset_processed_path,
+            crop_size=CROP_SIZE,
+            edge_padding=EDGE_PADDING
+        )
         cropper.crop(parsed_cells)
     else:
-        print(f"Warning: {json_path} not found. Skipping {subset} subset.")
+        print(f"Warning: {json_path} not found. Skipping {subset}.")
 
-print("\n✓ Tüm subset'ler işlendi!")
+print("\n✓ processed_v6 tamamlandı!")

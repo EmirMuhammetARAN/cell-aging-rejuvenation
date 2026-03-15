@@ -25,12 +25,12 @@ EXPERIMENT_NAME = "v4_unconditional"
 
 if __name__ == "__main__":
 
-    BATCH_SIZE = 2
+    BATCH_SIZE = 4
     VAL_BATCH_SIZE = 1
     NUM_EPOCHS = 100
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
     LR = 1e-4
-    GRADIENT_ACCUMULATION_STEPS = 8
+    GRADIENT_ACCUMULATION_STEPS = 4
     USE_BFLOAT16 = True
     MAX_GRAD_NORM = 1.0
     VAL_FREQ = 5
@@ -203,13 +203,20 @@ if __name__ == "__main__":
         else:
             print(f"Epoch {epoch+1} | Train Loss: {avg_train_loss:.4f}")
 
-        if (epoch + 1) % 50 == 0:
+        if (epoch + 1) % 10 == 0:
+            ckpt_path = os.path.join(root_dir, 'checkpoints', 'ldm', f'checkpoint_{EXPERIMENT_NAME}_epoch_{epoch+1}.pt')
             torch.save({
                 'epoch': epoch + 1,
                 'unet_state_dict': model.unet.state_dict(),
                 'ema_unet_state_dict': model.ema_unet.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'class_embed_state_dict': model.class_embed.state_dict(),
-            }, os.path.join(root_dir, 'checkpoints', 'ldm', f'checkpoint_{EXPERIMENT_NAME}_epoch_{epoch+1}.pt'))
+            }, ckpt_path)
+            # Keep only last 2 checkpoints
+            all_ckpts = sorted(glob.glob(os.path.join(root_dir, 'checkpoints', 'ldm', f'checkpoint_{EXPERIMENT_NAME}_epoch_*.pt')),
+                               key=lambda x: int(x.split('_epoch_')[-1].split('.pt')[0]))
+            for old_ckpt in all_ckpts[:-2]:
+                os.remove(old_ckpt)
+                print(f"  🗑 Eski checkpoint silindi: {os.path.basename(old_ckpt)}")
 
     print("Eğitim tamamlandı!")

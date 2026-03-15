@@ -1,4 +1,5 @@
 import os, sys, gc
+from copy import deepcopy
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import torch
@@ -15,9 +16,9 @@ from models.ldm.model_diffusers import CellLDM
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-TEST_YOUNG_DIR = os.path.join(root_dir, 'data', 'processed_v3', 'test', 'young')
-TEST_SENESCENT_DIR = os.path.join(root_dir, 'data', 'processed_v3', 'test', 'senescent')
-OUTPUT_DIR = os.path.join(root_dir, 'results', 'generated', 'ldm_diffusers_test')
+TEST_YOUNG_DIR = os.path.join(root_dir, 'data', 'processed_v6', 'test', 'young')
+TEST_SENESCENT_DIR = os.path.join(root_dir, 'data', 'processed_v6', 'test', 'senescent')
+OUTPUT_DIR = os.path.join(root_dir, 'results', 'generated', 'ldm_diffusers_v6_tightcrop')
 
 os.makedirs(os.path.join(OUTPUT_DIR, 'aging'), exist_ok=True)
 os.makedirs(os.path.join(OUTPUT_DIR, 'rejuvenation'), exist_ok=True)
@@ -36,13 +37,35 @@ model.to(DEVICE, memory_format=torch.channels_last)
 model.vae.to(memory_format=torch.channels_last)
 model.init_ema()
 
-checkpoint_path = os.path.join(root_dir, 'checkpoints', 'ldm', 'best_model_v3.pt')
+checkpoint_path = '/mnt/windows/checpotint/checkpoints/ldm/checkpoints/ldm/checkpoint_v6_tightcrop_epoch_200.pt'  # ← değiş
 print(f"Loading checkpoint: {checkpoint_path}")
 checkpoint = torch.load(checkpoint_path, map_location='cpu')
-model.unet.load_state_dict(checkpoint['unet_state_dict'])
-model.ema_unet.load_state_dict(checkpoint['ema_unet_state_dict'])
-model.class_embed.load_state_dict(checkpoint['class_embed_state_dict'])
-print(f"Loaded best model (val_loss: {checkpoint.get('val_loss', 'N/A')})")
+
+# LoRA unload (eğer varsa)
+if hasattr(model.unet, 'peft_config'):
+    print("Unloading existing LoRA...")
+    model.unet = model.unet.unload()
+
+# LoRA ekle (yeni)
+from peft import get_peft_model
+model.unet = get_peft_model(model.unet, model.loraconfig)
+print("✓ LoRA applied")
+
+# State dict yükle
+if 'unet_state_dict' in checkpoint:
+    model.unet.load_state_dict(checkpoint['unet_state_dict'], strict=False)
+    print("✓ UNet weights loaded")
+
+if 'class_embed_state_dict' in checkpoint:
+    model.class_embed.load_state_dict(checkpoint['class_embed_state_dict'])
+    print("✓ Class embedding loaded")
+
+# EMA UNet
+model.ema_unet = deepcopy(model.unet)
+model.ema_unet.requires_grad_(False)
+model.ema_unet.eval()
+
+print(f"✓ Model loaded (epoch: {checkpoint.get('epoch', 'N/A')})")
 del checkpoint
 gc.collect()
 torch.cuda.empty_cache()
@@ -59,14 +82,19 @@ for img_name in tqdm(young_images, desc="Aging"):
     if os.path.exists(out_path):
         skipped += 1
         continue
-    img_path = os.path.join(TEST_YOUNG_DIR, img_name)
-    image = transform(Image.open(img_path).convert('RGB')).unsqueeze(0).to(DEVICE, memory_format=torch.channels_last)
-    with torch.no_grad():
-        generated = model.translate(image, target_labels=torch.tensor([1], device=DEVICE),
-                                     strength=0.7, num_steps=50, use_ema=True, guidance_scale=3.0)
-    save_image(generated.cpu(), out_path)
-    del image, generated
-    torch.cuda.empty_cache()
+    try:
+        img_path = os.path.join(TEST_YOUNG_DIR, img_name)
+        image = transform(Image.open(img_path).convert('RGB')).unsqueeze(0).to(DEVICE, memory_format=torch.channels_last)
+        with torch.no_grad():
+            generated = model.translate(image, target_labels=torch.tensor([1], device=DEVICE),
+                                         strength=0.7, num_steps=50, use_ema=True, guidance_scale=3.0)
+        save_image(generated.cpu(), out_path)
+        del image, generated
+        torch.cuda.empty_cache()
+    except Exception as e:
+        print(f"Error processing {img_name}: {e}")
+        continue
+
 if skipped: print(f"  ({skipped} already existed, skipped)")
 
 # --- 2) Translation: Senescent → Young (rejuvenation) ---
@@ -79,14 +107,19 @@ for img_name in tqdm(senes_images, desc="Rejuvenation"):
     if os.path.exists(out_path):
         skipped += 1
         continue
-    img_path = os.path.join(TEST_SENESCENT_DIR, img_name)
-    image = transform(Image.open(img_path).convert('RGB')).unsqueeze(0).to(DEVICE, memory_format=torch.channels_last)
-    with torch.no_grad():
-        generated = model.translate(image, target_labels=torch.tensor([0], device=DEVICE),
-                                     strength=0.7, num_steps=50, use_ema=True, guidance_scale=3.0)
-    save_image(generated.cpu(), out_path)
-    del image, generated
-    torch.cuda.empty_cache()
+    try:
+        img_path = os.path.join(TEST_SENESCENT_DIR, img_name)
+        image = transform(Image.open(img_path).convert('RGB')).unsqueeze(0).to(DEVICE, memory_format=torch.channels_last)
+        with torch.no_grad():
+            generated = model.translate(image, target_labels=torch.tensor([0], device=DEVICE),
+                                         strength=0.7, num_steps=50, use_ema=True, guidance_scale=3.0)
+        save_image(generated.cpu(), out_path)
+        del image, generated
+        torch.cuda.empty_cache()
+    except Exception as e:
+        print(f"Error processing {img_name}: {e}")
+        continue
+
 if skipped: print(f"  ({skipped} already existed, skipped)")
 
 # --- 3) Random generation: Young ---
@@ -98,13 +131,18 @@ for i in tqdm(range(num_young), desc="Random Young"):
     if os.path.exists(out_path):
         skipped += 1
         continue
-    label = torch.zeros((1,), dtype=torch.long, device=DEVICE)
-    with torch.no_grad():
-        generated = model.sample(num_samples=1, device=DEVICE, labels=label,
-                                  use_ema=True, guidance_scale=3.0)
-    save_image(generated.cpu(), out_path)
-    del generated
-    torch.cuda.empty_cache()
+    try:
+        label = torch.zeros((1,), dtype=torch.long, device=DEVICE)
+        with torch.no_grad():
+            generated = model.sample(num_samples=1, device=DEVICE, labels=label,
+                                      use_ema=True, guidance_scale=3.0)
+        save_image(generated.cpu(), out_path)
+        del generated
+        torch.cuda.empty_cache()
+    except Exception as e:
+        print(f"Error generating young sample {i}: {e}")
+        continue
+
 if skipped: print(f"  ({skipped} already existed, skipped)")
 
 # --- 4) Random generation: Senescent ---
@@ -116,13 +154,18 @@ for i in tqdm(range(num_senes), desc="Random Senescent"):
     if os.path.exists(out_path):
         skipped += 1
         continue
-    label = torch.ones((1,), dtype=torch.long, device=DEVICE)
-    with torch.no_grad():
-        generated = model.sample(num_samples=1, device=DEVICE, labels=label,
-                                  use_ema=True, guidance_scale=3.0)
-    save_image(generated.cpu(), out_path)
-    del generated
-    torch.cuda.empty_cache()
+    try:
+        label = torch.ones((1,), dtype=torch.long, device=DEVICE)
+        with torch.no_grad():
+            generated = model.sample(num_samples=1, device=DEVICE, labels=label,
+                                      use_ema=True, guidance_scale=3.0)
+        save_image(generated.cpu(), out_path)
+        del generated
+        torch.cuda.empty_cache()
+    except Exception as e:
+        print(f"Error generating senescent sample {i}: {e}")
+        continue
+
 if skipped: print(f"  ({skipped} already existed, skipped)")
 
 print(f"\n✅ Tamamlandı! Sonuçlar: {OUTPUT_DIR}")

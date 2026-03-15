@@ -3,9 +3,10 @@ from PIL import Image
 from torch.utils.data import Dataset
 import torch
 import random
+from torchvision.transforms import functional as TF
 
 class LDMDataset(Dataset):
-    def __init__(self, root_dir, split='train', transform=None):
+    def __init__(self, root_dir, split='train', transform=None, data_version='processed_v4'):
         self.root_dir = root_dir
         self.split = split
         self.transform = transform
@@ -14,8 +15,7 @@ class LDMDataset(Dataset):
         self.images = []
         self.labels = [] 
         
-        # 1) Labeled data from processed_v2
-        data_dir = os.path.join(root_dir, 'data', 'processed_v2')
+        data_dir = os.path.join(root_dir, 'data', data_version)
         for class_name, label in [('young', 0), ('senescent', 1)]:
             class_dir = os.path.join(data_dir, split, class_name)
             if not os.path.exists(class_dir):
@@ -25,35 +25,14 @@ class LDMDataset(Dataset):
                     self.images.append(os.path.join(class_dir, fname))
                     self.labels.append(label)
         
-        # 2) Unlabeled data (only for training) → label=2 (unconditional)
-        if split == 'train':
-            unlabeled_dir = os.path.join(root_dir, 'data', 'unlabeled_patches')
-            if os.path.exists(unlabeled_dir):
-                for fname in sorted(os.listdir(unlabeled_dir)):
-                    if fname.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.tiff')):
-                        self.images.append(os.path.join(unlabeled_dir, fname))
-                        self.labels.append(2)  # unconditional
-        
-        labeled_count = sum(1 for l in self.labels if l < 2)
-        unlabeled_count = sum(1 for l in self.labels if l == 2)
         print(f"[LDMDataset] {split}: {len(self.images)} images "
-              f"(young={self.labels.count(0)}, senescent={self.labels.count(1)}, unlabeled={unlabeled_count})")
+              f"(young={self.labels.count(0)}, senescent={self.labels.count(1)})")
     
     def __len__(self):
         return len(self.images)
     
     def __getitem__(self, idx):
         img = Image.open(self.images[idx]).convert('RGB')
-        
-        if self.use_augmentation:
-            if random.random() > 0.5:
-                img = img.transpose(Image.FLIP_LEFT_RIGHT)
-            if random.random() > 0.5:
-                img = img.transpose(Image.FLIP_TOP_BOTTOM)
-            rot = random.choice([0, 1, 2, 3])
-            if rot > 0:
-                img = img.rotate(rot * 90, expand=False)
-        
         if self.transform:
             img = self.transform(img)
         

@@ -10,9 +10,10 @@ class CellLDM(nn.Module):
         super().__init__()
         
         self.vae = AutoencoderKL.from_pretrained(
-            "stabilityai/sd-vae-ft-mse"
+            "/mnt/windows/checpotint/vae_finetuned/best"
         )
-        
+        self.vae.requires_grad_(False)
+        self.vae.eval()
         self.num_classes = num_classes
         self.cfg_drop_prob = cfg_drop_prob
         
@@ -28,9 +29,8 @@ class CellLDM(nn.Module):
             beta_end=0.012,
             prediction_type="epsilon",
         )
-        self.class_embed = nn.Sequential(
-            nn.Embedding(num_classes + 1, 768)
-        )
+
+        self.class_embed = nn.Embedding(num_classes + 1, 768)
         
         self.loraconfig = LoraConfig(
             r=32,
@@ -49,17 +49,16 @@ class CellLDM(nn.Module):
             prediction_type="epsilon",
             clip_sample=False,
         )
-        self.vae.requires_grad_(False)
 
         self.scaling_factor = 0.18215
-        
         self.ema_unet = None
         self.ema_decay = 0.999
-    
+
     def init_ema(self):
         self.ema_unet = deepcopy(self.unet)
         self.ema_unet.requires_grad_(False)
         self.ema_unet.eval()
+
     
     @torch.no_grad()
     def update_ema(self):
@@ -73,11 +72,17 @@ class CellLDM(nn.Module):
         latent_dist = self.vae.encode(x).latent_dist
         latents = latent_dist.sample() * self.scaling_factor
         return latents
+    
     @torch.no_grad()
     def decode(self, latents):
-        latents = latents / self.scaling_factor
-        image = self.vae.decode(latents).sample
-        return image
+        images = []
+        for i in range(latents.shape[0]):
+            torch.cuda.empty_cache()
+            img = self.vae.decode(latents[i:i+1] / self.scaling_factor).sample
+            images.append(img)
+        images = torch.cat(images, dim=0)
+        images = (images.clamp(-1, 1) + 1) / 2
+        return images
 
     def forward(self, images, labels=None):
         latents = self.encode(images)
@@ -108,31 +113,25 @@ class CellLDM(nn.Module):
         
         uncond_labels = torch.full((num_samples,), self.num_classes, dtype=torch.long, device=device)
         
-        for t in self.inference_scheduler.timesteps:
-            t_batch = t.unsqueeze(0).repeat(num_samples).to(device)
-            
-            if guidance_scale > 1.0 and labels is not None:
-                class_emb = self.class_embed(labels)
-                class_emb = class_emb.unsqueeze(1)
-                noise_pred_cond = unet(latents, t_batch, encoder_hidden_states=class_emb).sample
-
-                uncond_class_emb = self.class_embed(uncond_labels)
-                uncond_class_emb = uncond_class_emb.unsqueeze(1)
-                noise_pred_uncond = unet(latents, t_batch, encoder_hidden_states=uncond_class_emb).sample
-                noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
-            else:
-                class_emb = self.class_embed(labels)
-                class_emb = class_emb.unsqueeze(1)
-                noise_pred = unet(latents, t_batch, encoder_hidden_states=class_emb).sample
-            
-            latents = self.inference_scheduler.step(noise_pred, t, latents).prev_sample
         
+        for t in self.inference_scheduler.timesteps:
+                t_batch = t.unsqueeze(0).repeat(num_samples).to(device)
+
+                if guidance_scale > 1.0 and labels is not None:
+                    class_emb = self.class_embed(labels).unsqueeze(1)
+                    noise_pred_cond = unet(latents, t_batch, encoder_hidden_states=class_emb).sample
+
+                    uncond_class_emb = self.class_embed(uncond_labels).unsqueeze(1)
+                    noise_pred_uncond = unet(latents, t_batch, encoder_hidden_states=uncond_class_emb).sample
+                    noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
+
+                latents = self.inference_scheduler.step(noise_pred, t, latents).prev_sample
+
         images = self.decode(latents)
-        images = (images.clamp(-1, 1) + 1) / 2
         return images
 
     @torch.no_grad()
-    def translate(self, images, target_labels, strength=0.6, num_steps=50, 
+    def translate(self, images, target_labels, strength=0.55, num_steps=50,
                   use_ema=True, guidance_scale=3.0):
         unet = self.ema_unet if (use_ema and self.ema_unet is not None) else self.unet
         unet.eval()
@@ -150,25 +149,22 @@ class CellLDM(nn.Module):
         
         uncond_labels = torch.full((images.shape[0],), self.num_classes, dtype=torch.long, device=images.device)
         
+    
         for t in timesteps[start_step:]:
-            t_batch = t.unsqueeze(0).repeat(images.shape[0]).to(images.device)
-            
-            if guidance_scale > 1.0:
-                target_class_emb = self.class_embed(target_labels)
-                target_class_emb = target_class_emb.unsqueeze(1)
-                noise_pred_cond = unet(noisy_latents, t_batch, encoder_hidden_states=target_class_emb).sample
+                t_batch = t.unsqueeze(0).repeat(images.shape[0]).to(images.device)
 
-                uncond_class_emb = self.class_embed(uncond_labels)
-                uncond_class_emb = uncond_class_emb.unsqueeze(1)
-                noise_pred_uncond = unet(noisy_latents, t_batch, encoder_hidden_states=uncond_class_emb).sample
-                noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
-            else:
-                target_class_emb = self.class_embed(target_labels)
-                target_class_emb = target_class_emb.unsqueeze(1)
-                noise_pred = unet(noisy_latents, t_batch, encoder_hidden_states=target_class_emb).sample
-            
-            noisy_latents = self.inference_scheduler.step(noise_pred, t, noisy_latents).prev_sample
+                if guidance_scale > 1.0:
+                    target_class_emb = self.class_embed(target_labels).unsqueeze(1)
+                    noise_pred_cond = unet(noisy_latents, t_batch, encoder_hidden_states=target_class_emb).sample
+
+                    uncond_class_emb = self.class_embed(uncond_labels).unsqueeze(1)
+                    noise_pred_uncond = unet(noisy_latents, t_batch, encoder_hidden_states=uncond_class_emb).sample
+                    noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
+                else:
+                    target_class_emb = self.class_embed(target_labels).unsqueeze(1)
+                    noise_pred = unet(noisy_latents, t_batch, encoder_hidden_states=target_class_emb).sample
+
+                noisy_latents = self.inference_scheduler.step(noise_pred, t, noisy_latents).prev_sample
         
         result = self.decode(noisy_latents)
-        result = (result.clamp(-1, 1) + 1) / 2
         return result

@@ -21,11 +21,13 @@ torch.backends.cudnn.allow_tf32 = True
 torch.set_float32_matmul_precision('medium')
 torch._dynamo.config.cache_size_limit = 64
 
+EXPERIMENT_NAME = "v5_contrastive"
+
 if __name__ == "__main__":
 
     BATCH_SIZE = 4
     VAL_BATCH_SIZE = 1
-    NUM_EPOCHS = 200
+    NUM_EPOCHS = 100
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
     LR = 1e-4
     GRADIENT_ACCUMULATION_STEPS = 4
@@ -48,22 +50,23 @@ if __name__ == "__main__":
     optimizer = torch.optim.AdamW([
         {'params': filter(lambda p: p.requires_grad, model.unet.parameters()), 'lr': LR},
         {'params': model.class_embed.parameters(), 'lr': LR},
+        {'params': model.projection_head.parameters(), 'lr': LR},
     ], weight_decay=1e-2)
 
     lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=NUM_EPOCHS, eta_min=1e-6)
 
     os.makedirs(os.path.join(root_dir, 'checkpoints', 'ldm'), exist_ok=True)
-    os.makedirs(os.path.join(root_dir, 'results', 'generated', 'ldm'), exist_ok=True)
+    os.makedirs(os.path.join(root_dir, 'results', 'generated', 'ldm', EXPERIMENT_NAME), exist_ok=True)
 
     best_val_loss = float('inf')
     start_epoch = 0
 
-    checkpoints = glob.glob(os.path.join(root_dir, 'checkpoints', 'ldm', 'checkpoint_v3_epoch_*.pt'))
+    # Auto-resume
+    checkpoints = glob.glob(os.path.join(root_dir, 'checkpoints', 'ldm', f'checkpoint_{EXPERIMENT_NAME}_epoch_*.pt'))
     if checkpoints:
         latest_checkpoint = max(checkpoints, key=lambda x: int(x.split('_epoch_')[-1].split('.pt')[0]))
         print(f"Loading checkpoint: {latest_checkpoint}")
         checkpoint = torch.load(latest_checkpoint, map_location='cpu')
-        
         model.unet.load_state_dict(checkpoint['unet_state_dict'])
         if 'ema_unet_state_dict' in checkpoint:
             model.ema_unet.load_state_dict(checkpoint['ema_unet_state_dict'])
@@ -73,7 +76,7 @@ if __name__ == "__main__":
         del checkpoint
         gc.collect()
         
-        best_model_path = os.path.join(root_dir, 'checkpoints', 'ldm', 'best_model_v3.pt')
+        best_model_path = os.path.join(root_dir, 'checkpoints', 'ldm', f'best_model_{EXPERIMENT_NAME}.pt')
         if os.path.exists(best_model_path):
             best_checkpoint = torch.load(best_model_path, map_location='cpu')
             best_val_loss = best_checkpoint.get('val_loss', float('inf'))
@@ -101,7 +104,10 @@ if __name__ == "__main__":
             labels = labels.to(DEVICE, non_blocking=True)
 
             with torch.amp.autocast('cuda', dtype=torch.bfloat16, enabled=USE_BFLOAT16):
-                loss = model(images, labels=labels)
+                diffusion_loss = model(images, labels=labels)
+                latents = model.encode_with_grad(images)
+                c_loss = model.contrastive_loss(latents, labels)
+                loss = diffusion_loss + 0.1 * c_loss
                 loss = loss / GRADIENT_ACCUMULATION_STEPS
 
             loss.backward()
@@ -137,7 +143,10 @@ if __name__ == "__main__":
                     images = images.to(DEVICE, non_blocking=True, memory_format=torch.channels_last)
                     labels = labels.to(DEVICE, non_blocking=True)
                     with torch.amp.autocast('cuda', dtype=torch.bfloat16, enabled=USE_BFLOAT16):
-                        loss = model(images, labels=labels)
+                        diffusion_loss = model(images, labels=labels)
+                        latents = model.encode_with_grad(images)
+                        c_loss = model.contrastive_loss(latents, labels)
+                        loss = diffusion_loss + 0.1 * c_loss
                     val_loss_sum += loss.item()
                     val_steps += 1
 
@@ -152,10 +161,9 @@ if __name__ == "__main__":
             young_samples = model.sample(num_samples=4, device=DEVICE, labels=young_labels, use_ema=use_ema, guidance_scale=3.0)
             senescent_samples = model.sample(num_samples=4, device=DEVICE, labels=senescent_labels, use_ema=use_ema, guidance_scale=3.0)
             
-            save_path_young = os.path.join(root_dir, 'results', 'generated', 'ldm', f'epoch_{epoch+1}_young.png')
-            save_path_senes = os.path.join(root_dir, 'results', 'generated', 'ldm', f'epoch_{epoch+1}_senescent.png')
-            save_image(young_samples, save_path_young, nrow=4)
-            save_image(senescent_samples, save_path_senes, nrow=4)
+            save_dir = os.path.join(root_dir, 'results', 'generated', 'ldm', EXPERIMENT_NAME)
+            save_image(young_samples, os.path.join(save_dir, f'epoch_{epoch+1}_young.png'), nrow=4)
+            save_image(senescent_samples, os.path.join(save_dir, f'epoch_{epoch+1}_senescent.png'), nrow=4)
 
             try:
                 val_iter = iter(val_dataloader)
@@ -179,12 +187,10 @@ if __name__ == "__main__":
                     senes_orig_vis = (senescent_img.clamp(-1, 1) + 1) / 2
                     
                     y2s_grid = torch.cat([young_orig_vis, translated_senes], dim=0)
-                    save_image(y2s_grid, os.path.join(root_dir, 'results', 'generated', 'ldm',
-                               f'epoch_{epoch+1}_translate_young2senes.png'), nrow=2)
+                    save_image(y2s_grid, os.path.join(save_dir, f'epoch_{epoch+1}_translate_young2senes.png'), nrow=2)
                     
                     s2y_grid = torch.cat([senes_orig_vis, translated_young], dim=0)
-                    save_image(s2y_grid, os.path.join(root_dir, 'results', 'generated', 'ldm',
-                               f'epoch_{epoch+1}_translate_senes2young.png'), nrow=2)
+                    save_image(s2y_grid, os.path.join(save_dir, f'epoch_{epoch+1}_translate_senes2young.png'), nrow=2)
                     
                     print(f"  ✓ Translation örnekleri kaydedildi")
             except Exception as e:
@@ -199,18 +205,25 @@ if __name__ == "__main__":
                     'optimizer_state_dict': optimizer.state_dict(),
                     'class_embed_state_dict': model.class_embed.state_dict(),
                     'val_loss': avg_val_loss,
-                }, os.path.join(root_dir, 'checkpoints', 'ldm', 'best_model_v3.pt'))
+                }, os.path.join(root_dir, 'checkpoints', 'ldm', f'best_model_{EXPERIMENT_NAME}.pt'))
                 print(f"  ✓ Best model saved (val_loss: {avg_val_loss:.4f})")
         else:
             print(f"Epoch {epoch+1} | Train Loss: {avg_train_loss:.4f}")
 
-        if (epoch + 1) % 20 == 0:
+        if (epoch + 1) % 1 == 0:
+            ckpt_path = os.path.join(root_dir, 'checkpoints', 'ldm', f'checkpoint_{EXPERIMENT_NAME}_epoch_{epoch+1}.pt')
             torch.save({
                 'epoch': epoch + 1,
                 'unet_state_dict': model.unet.state_dict(),
                 'ema_unet_state_dict': model.ema_unet.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'class_embed_state_dict': model.class_embed.state_dict(),
-            }, os.path.join(root_dir, 'checkpoints', 'ldm', f'checkpoint_v3_epoch_{epoch+1}.pt'))
+            }, ckpt_path)
+            # Keep only last 2 checkpoints
+            all_ckpts = sorted(glob.glob(os.path.join(root_dir, 'checkpoints', 'ldm', f'checkpoint_{EXPERIMENT_NAME}_epoch_*.pt')),
+                               key=lambda x: int(x.split('_epoch_')[-1].split('.pt')[0]))
+            for old_ckpt in all_ckpts[:-2]:
+                os.remove(old_ckpt)
+                print(f"  🗑 Eski checkpoint silindi: {os.path.basename(old_ckpt)}")
 
     print("Eğitim tamamlandı!")
