@@ -18,7 +18,7 @@ DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 TEST_YOUNG_DIR = os.path.join(root_dir, 'data', 'processed_v6', 'test', 'young')
 TEST_SENESCENT_DIR = os.path.join(root_dir, 'data', 'processed_v6', 'test', 'senescent')
-OUTPUT_DIR = os.path.join(root_dir, 'results', 'generated', 'ldm_diffusers_v6_tightcrop')
+OUTPUT_DIR = os.path.join(root_dir, 'results', 'generated', 'ldm_diffusers_v6_tightcrop_ep200')
 
 os.makedirs(os.path.join(OUTPUT_DIR, 'aging'), exist_ok=True)
 os.makedirs(os.path.join(OUTPUT_DIR, 'rejuvenation'), exist_ok=True)
@@ -37,8 +37,7 @@ model.to(DEVICE, memory_format=torch.channels_last)
 model.vae.to(memory_format=torch.channels_last)
 model.init_ema()
 
-checkpoint_path = '/mnt/windows/checpotint/checkpoints/ldm/checkpoints/ldm/checkpoint_v6_tightcrop_epoch_200.pt'  # ← değiş
-print(f"Loading checkpoint: {checkpoint_path}")
+checkpoint_path = 'checkpoints/ldm/v7/checkpoint_v6_tightcrop_epoch_200.pt'
 checkpoint = torch.load(checkpoint_path, map_location='cpu')
 
 # LoRA unload (eğer varsa)

@@ -1,6 +1,10 @@
 import os, sys
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 os.environ.setdefault("TORCH_LOGS", "-dynamo,-inductor")
+os.environ.setdefault("HF_HUB_OFFLINE", "0")
+os.environ.setdefault("HF_DATASETS_OFFLINE", "0")
+os.environ.setdefault("CUDA_LAUNCH_BLOCKING", "0")
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4294967296")
 
 import torch
 from torchvision import transforms
@@ -37,6 +41,8 @@ if __name__ == "__main__":
     USE_BFLOAT16 = True
     MAX_GRAD_NORM = 1.0
     VAL_FREQ = 5
+    CHECKPOINT_EPOCHS = (25, 50, 75, 100, 125, 150, 175, 200) 
+    LPIPS_WEIGHT = 0.1 
 
     transform = transforms.Compose([
         transforms.ToTensor(),
@@ -45,7 +51,7 @@ if __name__ == "__main__":
 
     import gc, glob
 
-    model = CellLDM(num_classes=2)
+    model = CellLDM(num_classes=2, lpips_weight=LPIPS_WEIGHT)
     model.to(DEVICE, memory_format=torch.channels_last)
     model.vae.to(memory_format=torch.channels_last)
     model.init_ema() 
@@ -62,18 +68,17 @@ if __name__ == "__main__":
     lr_scheduler = torch.optim.lr_scheduler.SequentialLR(
         optimizer, schedulers=[warmup_scheduler, cosine_scheduler], milestones=[WARMUP_EPOCHS])
 
-    CHECKPOINT_PATH = "/mnt/windows/checpotint/checkpoints/ldm/checkpoint_v6_tightcrop_epoch_100.pt"
-    OUTPUT_DIR = "/mnt/windows/checpotint/checkpoints/ldm"  # ← bu zaten tam path
+    OUTPUT_DIR = os.path.join(root_dir, 'checkpoints', 'ldm')
+    RESULTS_DIR = os.path.join(root_dir, 'results', 'generated', 'ldm', EXPERIMENT_NAME)
 
-    os.makedirs(OUTPUT_DIR, exist_ok=True)  # ← sadece OUTPUT_DIR, çift yapma
-    os.makedirs(os.path.join(OUTPUT_DIR, 'results', 'generated', 'ldm', EXPERIMENT_NAME), exist_ok=True)
+    CHECKPOINT_DIR = OUTPUT_DIR
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.makedirs(RESULTS_DIR, exist_ok=True)
 
     best_val_loss = float('inf')
     start_epoch = 0
 
-    # Auto-resume
-    checkpoints = glob.glob(os.path.join(OUTPUT_DIR, f'checkpoint_{EXPERIMENT_NAME}_epoch_*.pt'))
-    # ↑ ayrı 'checkpoints/ldm' ekleme
+    checkpoints = glob.glob(os.path.join(CHECKPOINT_DIR, f'checkpoint_{EXPERIMENT_NAME}_epoch_*.pt'))
     if checkpoints:
         latest_checkpoint = max(checkpoints, key=lambda x: int(x.split('_epoch_')[-1].split('.pt')[0]))
         print(f"Loading checkpoint: {latest_checkpoint}")
@@ -89,7 +94,7 @@ if __name__ == "__main__":
         del checkpoint
         gc.collect()
         
-        best_model_path = os.path.join(OUTPUT_DIR, 'checkpoints', 'ldm', f'best_model_{EXPERIMENT_NAME}.pt')
+        best_model_path = os.path.join(CHECKPOINT_DIR, f'best_model_{EXPERIMENT_NAME}.pt')
         if os.path.exists(best_model_path):
             best_checkpoint = torch.load(best_model_path, map_location='cpu')
             best_val_loss = best_checkpoint.get('val_loss', float('inf'))
@@ -102,7 +107,6 @@ if __name__ == "__main__":
     train_dataset = LDMDataset(root_dir=root_dir, split='train', transform=transform, data_version='processed_v6')
     val_dataset = LDMDataset(root_dir=root_dir, split='test', transform=transform, data_version='processed_v6')
 
-    # Balanced sampling: young/senescent eşit
     young_count = train_dataset.labels.count(0)
     senes_count = train_dataset.labels.count(1)
     class_weights = {0: 1.0 / young_count, 1: 1.0 / senes_count}
@@ -178,7 +182,7 @@ if __name__ == "__main__":
             senescent_samples = model.sample(num_samples=4, device=DEVICE, labels=senescent_labels, use_ema=use_ema, guidance_scale=3.0).cpu()
             torch.cuda.empty_cache()
 
-            save_dir = os.path.join(OUTPUT_DIR, 'results', 'generated', 'ldm', EXPERIMENT_NAME)
+            save_dir = RESULTS_DIR
             save_image(young_samples, os.path.join(save_dir, f'epoch_{epoch+1}_young.png'), nrow=4)
             save_image(senescent_samples, os.path.join(save_dir, f'epoch_{epoch+1}_senescent.png'), nrow=4)
 
@@ -228,13 +232,13 @@ if __name__ == "__main__":
                     'class_embed_state_dict': model.class_embed.state_dict(),
                     'val_loss': avg_val_loss,
                     'lr_scheduler_state_dict': lr_scheduler.state_dict(),
-                }, os.path.join(OUTPUT_DIR, 'checkpoints', 'ldm', f'best_model_{EXPERIMENT_NAME}.pt'))
+                }, os.path.join(CHECKPOINT_DIR, f'best_model_{EXPERIMENT_NAME}.pt'))
                 print(f"  ✓ Best model saved (val_loss: {avg_val_loss:.4f})")
         else:
             print(f"Epoch {epoch+1} | Train Loss: {avg_train_loss:.4f}")
 
-        if (epoch + 1) % 5 == 0:
-            ckpt_path = os.path.join(OUTPUT_DIR, 'checkpoints', 'ldm', f'checkpoint_{EXPERIMENT_NAME}_epoch_{epoch+1}.pt')
+        if (epoch + 1) in CHECKPOINT_EPOCHS:
+            ckpt_path = os.path.join(CHECKPOINT_DIR, f'checkpoint_{EXPERIMENT_NAME}_epoch_{epoch+1}.pt')
             torch.save({
                 'epoch': epoch + 1,
                 'unet_state_dict': model.unet.state_dict(),
@@ -243,11 +247,6 @@ if __name__ == "__main__":
                 'class_embed_state_dict': model.class_embed.state_dict(),
                 'lr_scheduler_state_dict': lr_scheduler.state_dict(),
             }, ckpt_path)
-            # Keep only last 1 checkpoint
-            all_ckpts = sorted(glob.glob(os.path.join(OUTPUT_DIR, 'checkpoints', 'ldm', f'checkpoint_{EXPERIMENT_NAME}_epoch_*.pt')),
-                               key=lambda x: int(x.split('_epoch_')[-1].split('.pt')[0]))
-            for old_ckpt in all_ckpts[:-1]:
-                os.remove(old_ckpt)
-                print(f"  🗑 Eski checkpoint silindi: {os.path.basename(old_ckpt)}")
+            print(f"  ✓ Checkpoint kaydedildi: epoch_{epoch+1}.pt")
 
     print("Eğitim tamamlandı!")

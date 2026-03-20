@@ -19,7 +19,7 @@ LR_DECODER = 1e-5
 EPOCHS = 20
 BATCH_SIZE = 1
 GRAD_ACCUM = 8
-OUTPUT_DIR = '/mnt/windows/checpotint/vae_finetuned'
+OUTPUT_DIR = os.path.join(root_dir, 'checkpoints', 'vae_finetuned')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(os.path.join(OUTPUT_DIR, 'visuals'), exist_ok=True)
 

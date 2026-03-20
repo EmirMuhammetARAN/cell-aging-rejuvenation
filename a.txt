@@ -1,0 +1,18 @@
+padding başarısız
+color jitter hue auglar başarısız
+contrast brightness başarısız
+r=8 başarısız
+inference autocast başarısız
+vae eğittik sonra unet başarılı
+loss yeirne farklı bişi yapmak lazım fid ve active learning
+
+
+
+
+
+
+
+seval.kupcu@gmail.com
+
+
+

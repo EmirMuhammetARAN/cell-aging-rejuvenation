@@ -12,7 +12,7 @@ from models.classifier.classifier import Classifier
 from PIL import Image
 
 model = Classifier(output_size=2)
-model.load_state_dict(torch.load(os.path.join(root_dir, 'checkpoints/classifier/classifier.pth')))
+model.load_state_dict(torch.load(os.path.join(root_dir, 'checkpoints', 'classifier', 'classifier.pth')))
 model.to('cuda')
 model.eval()
 

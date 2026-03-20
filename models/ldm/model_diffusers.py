@@ -1,22 +1,60 @@
+import os
+import json
+import sys
+
+# Ensure offline mode is disabled to allow model downloads
+os.environ['HF_HUB_OFFLINE'] = '0'
+os.environ['HF_DATASETS_OFFLINE'] = '0'
+
 import torch
 import torch.nn as nn
-from diffusers import UNet2DConditionModel, AutoencoderKL, DDPMScheduler, DDIMScheduler
+# Workaround for tokenizers version mismatch
+try:
+    from diffusers import UNet2DConditionModel, AutoencoderKL, DDPMScheduler, DDIMScheduler
+except ImportError as e:
+    import warnings
+    warnings.filterwarnings("ignore")
+    # Try importing anyway despite version warnings
+    import sys
+    from diffusers import UNet2DConditionModel, AutoencoderKL, DDPMScheduler, DDIMScheduler
 from copy import deepcopy
 import torch.nn.functional as F
 from peft import get_peft_model, LoraConfig
+from lpips import LPIPS
+
 
 class CellLDM(nn.Module):
-    def __init__(self, num_classes=2, cfg_drop_prob=0.15):
+    def __init__(self, num_classes=2, cfg_drop_prob=0.15, lpips_weight: float = 0.0):
         super().__init__()
         
-        self.vae = AutoencoderKL.from_pretrained(
-            "/mnt/windows/checpotint/vae_finetuned/best"
-        )
+        import os
+        import json
+        # Robust path resolution
+        current_file = os.path.abspath(__file__)
+        model_dir = os.path.dirname(current_file)  # models/ldm
+        models_dir = os.path.dirname(model_dir)  # models
+        root_dir = os.path.dirname(models_dir)  # project root
+        
+        vae_path = os.path.join(root_dir, 'checkpoints', 'vae_finetuned', 'best')
+        
+        # Load VAE config manually to avoid path validation issues
+        config_path = os.path.join(vae_path, 'config.json')
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        self.vae = AutoencoderKL(**config)
+        
+        # Load weights from safetensors
+        from safetensors.torch import load_file
+        weights_path = os.path.join(vae_path, 'diffusion_pytorch_model.safetensors')
+        state_dict = load_file(weights_path)
+        self.vae.load_state_dict(state_dict)
+        
         self.vae.requires_grad_(False)
         self.vae.eval()
         self.num_classes = num_classes
         self.cfg_drop_prob = cfg_drop_prob
         
+        # Load UNet (will download on first run and cache)
         self.unet = UNet2DConditionModel.from_pretrained(
             "runwayml/stable-diffusion-v1-5",
             subfolder="unet",
@@ -53,6 +91,14 @@ class CellLDM(nn.Module):
         self.scaling_factor = 0.18215
         self.ema_unet = None
         self.ema_decay = 0.999
+        self.lpips_weight = lpips_weight
+
+        self.lpips_loss = None
+        if self.lpips_weight > 0.0:
+            # LPIPS ağı yalnızca loss hesaplamak için kullanılıyor, eğitilmiyor
+            self.lpips_loss = LPIPS(net="vgg")
+            self.lpips_loss.eval()
+            self.lpips_loss.requires_grad_(False)
 
     def init_ema(self):
         self.ema_unet = deepcopy(self.unet)
@@ -94,12 +140,40 @@ class CellLDM(nn.Module):
         if labels is not None and self.training:
             drop_mask = torch.rand(labels.shape[0], device=labels.device) < self.cfg_drop_prob
             labels = labels.clone()
-            labels[drop_mask] = self.num_classes 
+            labels[drop_mask] = self.num_classes
 
         class_emb = self.class_embed(labels).unsqueeze(1)
         noise_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states=class_emb).sample
-        loss = F.mse_loss(noise_pred, noise)
-        return loss
+        mse_loss = F.mse_loss(noise_pred, noise)
+
+        # Varsayılan: sadece diffusion MSE loss
+        if self.lpips_weight <= 0.0 or self.lpips_loss is None or not self.training:
+            return mse_loss
+
+        # LPIPS için, predicted original sample'ı manuel olarak hesapla
+        # Formül: x0 = (xt - sqrt(1 - alpha_prod_t) * noise_pred) / sqrt(alpha_prod_t)
+        alphas_cumprod = self.train_scheduler.alphas_cumprod[timesteps]
+        alphas_cumprod = alphas_cumprod.reshape(-1, 1, 1, 1)  # reshape for broadcasting
+        
+        sqrt_alpha_prod = torch.sqrt(alphas_cumprod)
+        sqrt_one_minus_alpha_prod = torch.sqrt(1 - alphas_cumprod)
+        
+        pred_x0_latents = (noisy_latents - sqrt_one_minus_alpha_prod * noise_pred) / sqrt_alpha_prod
+
+        # Bu görüntüler VAE'den geçtiği için [0, 1] aralığında
+        recon_images = self.decode(pred_x0_latents)
+
+        # LPIPS -1..1 aralığında bekliyor, bu yüzden yeniden ölçekle
+        recon_lpips = recon_images * 2.0 - 1.0
+        target_lpips = images.clamp(-1, 1)
+
+        # LPIPS modülünü doğru cihaza taşı
+        if self.lpips_loss is not None:
+            self.lpips_loss.to(images.device)
+
+        lpips_val = self.lpips_loss(recon_lpips, target_lpips).mean()
+        total_loss = mse_loss + self.lpips_weight * lpips_val
+        return total_loss
 
     @torch.no_grad()
     def sample(self, num_samples=4, device='cuda', labels=None, use_ema=True, 
