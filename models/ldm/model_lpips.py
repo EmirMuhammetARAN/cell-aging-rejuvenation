@@ -1,15 +1,18 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from diffusers import UNet2DModel, AutoencoderKL, DDPMScheduler, DDIMScheduler
 from copy import deepcopy
+import lpips
 
 class CellLDM(nn.Module):
-    def __init__(self, num_classes=2, cfg_drop_prob=0.15):
+    def __init__(self, num_classes=2, cfg_drop_prob=0.15, lpips_weight=0.01, vae_path=None):
         super().__init__()
 
-        self.vae = AutoencoderKL.from_pretrained(
-            "stabilityai/sd-vae-ft-mse"
-        )
+        if vae_path is not None:
+            self.vae = AutoencoderKL.from_pretrained(vae_path)
+        else:
+            self.vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse")
 
         self.num_classes = num_classes
         self.cfg_drop_prob = cfg_drop_prob
@@ -60,6 +63,9 @@ class CellLDM(nn.Module):
         self.ema_unet = None
         self.ema_decay = 0.999
 
+        # Latent-space structural loss weight (replaces pixel LPIPS constraints)
+        self.lpips_weight = lpips_weight
+
     def init_ema(self):
         self.ema_unet = deepcopy(self.unet)
         self.ema_unet.requires_grad_(False)
@@ -97,8 +103,19 @@ class CellLDM(nn.Module):
             labels[drop_mask] = self.num_classes  
 
         noise_pred = self.unet(noisy_latents, timesteps, class_labels=labels).sample
-        loss = nn.functional.mse_loss(noise_pred, noise)
-        return loss
+        mse_loss = F.mse_loss(noise_pred, noise)
+
+        # Latent-space structural loss: predict x0 and compare directly to true latents
+        # This completely avoids the VAE decoder's massive overhead while enforcing structural accuracy
+        if self.lpips_weight > 0 and self.training:
+            alpha_prod_t = self.train_scheduler.alphas_cumprod.to(latents.device)[timesteps]
+            alpha_prod_t = alpha_prod_t.view(-1, 1, 1, 1)
+            pred_x0 = (noisy_latents - (1 - alpha_prod_t).sqrt() * noise_pred) / (alpha_prod_t.sqrt() + 1e-8)
+            
+            latent_loss = F.l1_loss(pred_x0, latents)
+            return mse_loss + self.lpips_weight * latent_loss
+        
+        return mse_loss
 
     @torch.no_grad()
     def sample(self, num_samples=4, device='cuda', labels=None, use_ema=True, 

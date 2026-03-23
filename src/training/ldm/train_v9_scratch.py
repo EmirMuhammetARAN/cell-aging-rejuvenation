@@ -16,9 +16,10 @@ root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(curre
 sys.path.insert(0, root_dir)
 
 from models.ldm.ldm_dataset import LDMDataset
-from models.ldm.model import CellLDM
+from models.ldm.model_lpips import CellLDM
 
 from tqdm import tqdm
+import gc
 
 torch.backends.cudnn.benchmark = True
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -26,42 +27,48 @@ torch.backends.cudnn.allow_tf32 = True
 torch.set_float32_matmul_precision('medium')
 torch._dynamo.config.cache_size_limit = 64
 
-EXPERIMENT_NAME = "v6_tightcrop_lpips"  
+EXPERIMENT_NAME = "v9_scratch_v6"  
 
 if __name__ == "__main__":
 
-    BATCH_SIZE = 4
+    BATCH_SIZE = 2
     VAL_BATCH_SIZE = 1
-    NUM_EPOCHS = 140
+    NUM_EPOCHS = 150
     WARMUP_EPOCHS = 5
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-    LR_LORA = 5e-5 
-    LR_EMBED = 5e-5
-    GRADIENT_ACCUMULATION_STEPS = 4
+    LR = 1e-4
+    GRADIENT_ACCUMULATION_STEPS = 8
     USE_BFLOAT16 = True
     MAX_GRAD_NORM = 1.0
-    VAL_FREQ = 5
-    CHECKPOINT_EPOCHS = (25, 50, 75, 100, 125, 150, 175, 200) 
-    LPIPS_WEIGHT = 0.1 
+    VAL_FREQ = 10
+    CHECKPOINT_EPOCHS = (10, 25, 50, 75, 100, 125, 150) 
+    LPIPS_WEIGHT = 0.03 
 
-    transform = transforms.Compose([
+    # Data augmentation (safe flips for microscopy)
+    train_transform = transforms.Compose([
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomVerticalFlip(),
         transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
 
-    import gc, glob
+    val_transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    ])
 
-    model = CellLDM(lpips_weight=LPIPS_WEIGHT, use_lpips=True) 
+    # SD VAE (pretrained, proven to work)
+    model = CellLDM(lpips_weight=LPIPS_WEIGHT) 
     model.to(DEVICE, memory_format=torch.channels_last)
     model.vae.to(memory_format=torch.channels_last)
     model.init_ema() 
 
     optimizer = torch.optim.AdamW([
-        {'params': filter(lambda p: p.requires_grad, model.unet.parameters()), 'lr': LR_LORA},
+        {'params': filter(lambda p: p.requires_grad, model.unet.parameters()), 'lr': LR},
     ], weight_decay=1e-2, betas=(0.9, 0.999), eps=1e-8)
 
     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
-        optimizer, start_factor=0.1, end_factor=1.0, total_iters=WARMUP_EPOCHS)
+        optimizer, start_factor=0.01, end_factor=1.0, total_iters=WARMUP_EPOCHS)
     cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=NUM_EPOCHS - WARMUP_EPOCHS, eta_min=1e-7)
     lr_scheduler = torch.optim.lr_scheduler.SequentialLR(
@@ -77,23 +84,31 @@ if __name__ == "__main__":
     best_val_loss = float('inf')
     start_epoch = 0
 
-    checkpoint_path = os.path.join(CHECKPOINT_DIR, 'best_model_v2.pt')
-    if os.path.exists(checkpoint_path):
-        print(f"Loading checkpoint: {checkpoint_path}")
-        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+    # Resume from checkpoint if exists
+    resume_path = os.path.join(CHECKPOINT_DIR, f'best_model_{EXPERIMENT_NAME}.pt')
+    if os.path.exists(resume_path):
+        print(f"Resuming from: {resume_path}")
+        checkpoint = torch.load(resume_path, map_location='cpu')
         model.unet.load_state_dict(checkpoint['unet_state_dict'], strict=True)
         if 'ema_unet_state_dict' in checkpoint:
             model.ema_unet.load_state_dict(checkpoint['ema_unet_state_dict'], strict=True)
-        start_epoch = checkpoint['epoch'] 
-        best_val_loss = checkpoint.get('val_loss', float('inf'))
+        if 'optimizer_state_dict' in checkpoint:
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        if 'lr_scheduler_state_dict' in checkpoint:
+            lr_scheduler.load_state_dict(checkpoint['lr_scheduler_state_dict'])
+        if 'epoch' in checkpoint:
+            start_epoch = checkpoint['epoch']
+        if 'val_loss' in checkpoint:
+            best_val_loss = checkpoint['val_loss']
         del checkpoint
         gc.collect()
-        print(f"Resuming training from epoch {start_epoch + 1}")
+        print(f"Resumed from epoch {start_epoch}, best_val_loss: {best_val_loss:.4f}")
     else:
-        print(f"Warning: Checkpoint not found at {checkpoint_path}")
+        print("Starting from scratch (no checkpoint found)")
 
-    train_dataset = LDMDataset(root_dir=root_dir, split='train', transform=transform, data_version='processed_v6')
-    val_dataset = LDMDataset(root_dir=root_dir, split='test', transform=transform, data_version='processed_v6')
+    # V6 Dataset (dynamic zoom)
+    train_dataset = LDMDataset(root_dir=root_dir, split='train', transform=train_transform, data_version='processed_v6')
+    val_dataset = LDMDataset(root_dir=root_dir, split='test', transform=val_transform, data_version='processed_v6')
 
     young_count = train_dataset.labels.count(0)
     senes_count = train_dataset.labels.count(1)
@@ -158,14 +173,14 @@ if __name__ == "__main__":
             print(f"Epoch {epoch+1} | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
 
             model.unet.eval()
-            use_ema = (epoch + 1) >= 5
+            use_ema = (epoch + 1) >= 10
             young_labels = torch.zeros(4, dtype=torch.long, device=DEVICE)
             senescent_labels = torch.ones(4, dtype=torch.long, device=DEVICE)
 
             torch.cuda.empty_cache()
-            young_samples = model.sample(num_samples=4, device=DEVICE, labels=young_labels, use_ema=use_ema, guidance_scale=3.0).cpu()
+            young_samples = model.sample(num_samples=4, device=DEVICE, labels=young_labels, use_ema=use_ema, guidance_scale=2.0).cpu()
             torch.cuda.empty_cache()
-            senescent_samples = model.sample(num_samples=4, device=DEVICE, labels=senescent_labels, use_ema=use_ema, guidance_scale=3.0).cpu()
+            senescent_samples = model.sample(num_samples=4, device=DEVICE, labels=senescent_labels, use_ema=use_ema, guidance_scale=2.0).cpu()
             torch.cuda.empty_cache()
 
             save_dir = RESULTS_DIR
@@ -185,11 +200,11 @@ if __name__ == "__main__":
 
                 if young_img is not None and senescent_img is not None:
                     target_senes = torch.ones(1, dtype=torch.long, device=DEVICE)
-                    translated_senes = model.translate(young_img, target_senes, strength=0.6, use_ema=use_ema, guidance_scale=3.0).cpu()
+                    translated_senes = model.translate(young_img, target_senes, strength=0.85, use_ema=use_ema, guidance_scale=2.5).cpu()
                     torch.cuda.empty_cache()
 
                     target_young = torch.zeros(1, dtype=torch.long, device=DEVICE)
-                    translated_young = model.translate(senescent_img, target_young, strength=0.6, use_ema=use_ema, guidance_scale=3.0).cpu()
+                    translated_young = model.translate(senescent_img, target_young, strength=0.75, use_ema=use_ema, guidance_scale=2.0).cpu()
                     torch.cuda.empty_cache()
 
                     young_orig_vis = (young_img.clamp(-1, 1) + 1) / 2

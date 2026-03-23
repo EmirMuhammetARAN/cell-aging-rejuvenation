@@ -31,8 +31,7 @@ tasks = [
     ('random_samples_young', 1, real_young),     
     ('random_samples_senescent', 0, real_senescent),  
 ]
-
-ldm_test_dir = os.path.join(root_dir, 'results', 'generated', 'ldm_diffusers_v6_tightcrop')
+ldm_test_dir = os.path.join(root_dir, 'results', 'generated', 'ldm_v8')
 
 print("=" * 60)
 print("CLASSIFIER ACCURACY")
