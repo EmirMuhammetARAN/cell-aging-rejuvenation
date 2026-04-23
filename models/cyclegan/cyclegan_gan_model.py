@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
+import lpips
 
 class CycleGANModel(nn.Module):
-    def __init__(self, generator, discriminator, device):
+    def __init__(self, generator, discriminator, device, use_lpips=True, lpips_weight=0.5):
         super(CycleGANModel, self).__init__()
         self.G_AB = generator()
         self.G_BA = generator()
@@ -14,11 +15,23 @@ class CycleGANModel(nn.Module):
         self.criterion_cycle = nn.L1Loss()
         self.criterion_identity = nn.L1Loss()
 
-        self.optimizer_G = torch.optim.Adam(list(self.G_AB.parameters()) + list(self.G_BA.parameters()), lr=0.0002, betas=(0.5, 0.999))
+        # LPIPS perceptual loss for cycle consistency
+        self.use_lpips = use_lpips
+        self.lpips_weight = lpips_weight
+        if use_lpips:
+            self.lpips_fn = lpips.LPIPS(net='vgg').to(device)
+            self.lpips_fn.eval()
+            for p in self.lpips_fn.parameters():
+                p.requires_grad_(False)
+
+        self.optimizer_G = torch.optim.Adam(
+            list(self.G_AB.parameters()) + list(self.G_BA.parameters()),
+            lr=0.0002, betas=(0.5, 0.999)
+        )
         self.optimizer_D_A = torch.optim.Adam(self.D_A.parameters(), lr=0.0002, betas=(0.5, 0.999))
         self.optimizer_D_B = torch.optim.Adam(self.D_B.parameters(), lr=0.0002, betas=(0.5, 0.999))
 
-    def set_input(self,input):
+    def set_input(self, input):
         self.real_A = input['A'].to(self.device)
         self.real_B = input['B'].to(self.device)
     
@@ -28,16 +41,30 @@ class CycleGANModel(nn.Module):
         self.fake_A = self.G_BA(self.real_B)
         self.rec_B = self.G_AB(self.fake_A)
     
+    def _cycle_loss(self, reconstructed, original):
+        """Compute cycle consistency loss: L1 + optional LPIPS."""
+        l1_loss = self.criterion_cycle(reconstructed, original)
+        if self.use_lpips:
+            with torch.amp.autocast('cuda', enabled=False):
+                lpips_loss = self.lpips_fn(
+                    reconstructed.float(), original.float()
+                ).mean()
+            return l1_loss + self.lpips_weight * lpips_loss
+        return l1_loss
+
     def backward_G(self):
+        # GAN losses
         pred_fake_B = self.D_B(self.fake_B)
         loss_G_AB = self.criterion_GAN(pred_fake_B, torch.ones_like(pred_fake_B))
 
         pred_fake_A = self.D_A(self.fake_A)
         loss_G_BA = self.criterion_GAN(pred_fake_A, torch.ones_like(pred_fake_A))
 
-        loss_cycle_A = self.criterion_cycle(self.rec_A, self.real_A) * 10.0
-        loss_cycle_B = self.criterion_cycle(self.rec_B, self.real_B) * 10.0
+        # Cycle consistency with LPIPS
+        loss_cycle_A = self._cycle_loss(self.rec_A, self.real_A) * 10.0
+        loss_cycle_B = self._cycle_loss(self.rec_B, self.real_B) * 10.0
 
+        # Identity losses
         loss_identity_A = self.criterion_identity(self.G_BA(self.real_A), self.real_A) * 5.0
         loss_identity_B = self.criterion_identity(self.G_AB(self.real_B), self.real_B) * 5.0
 
@@ -45,7 +72,7 @@ class CycleGANModel(nn.Module):
 
         return loss_G
 
-    def backward_D(self,D,real,fake):
+    def backward_D(self, D, real, fake):
         pred_real = D(real)
         loss_D_real = self.criterion_GAN(pred_real, torch.ones_like(pred_real))
 
@@ -56,7 +83,7 @@ class CycleGANModel(nn.Module):
 
         return loss_D
     
-    def train_step(self,input,scaler):
+    def train_step(self, input, scaler):
         self.set_input(input)
 
         with torch.amp.autocast('cuda'):

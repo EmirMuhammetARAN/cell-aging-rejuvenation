@@ -12,18 +12,17 @@ from models.classifier.classifier import Classifier
 from PIL import Image
 
 model = Classifier(output_size=2)
-model.load_state_dict(torch.load(os.path.join(root_dir, 'checkpoints', 'classifier', 'classifier.pth')))
+model.load_state_dict(torch.load(os.path.join(root_dir, 'checkpoints', 'classifier', 'classifier_v2.pth')))
 model.to('cuda')
 model.eval()
 
 transform = transforms.Compose([
-    transforms.Resize((256, 256)),
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 
-real_young = os.path.join(root_dir, 'data', 'processed_v6', 'test', 'young')
-real_senescent = os.path.join(root_dir, 'data', 'processed_v6', 'test', 'senescent')
+real_young = os.path.join(root_dir, 'data', 'processed_v2', 'test', 'young')
+real_senescent = os.path.join(root_dir, 'data', 'processed_v2', 'test', 'senescent')
 
 tasks = [
     ('aging', 0, real_senescent),              
@@ -31,7 +30,7 @@ tasks = [
     ('random_samples_young', 1, real_young),     
     ('random_samples_senescent', 0, real_senescent),  
 ]
-ldm_test_dir = os.path.join(root_dir, 'results', 'generated', 'ldm_v8')
+ldm_test_dir = os.path.join(root_dir, 'results', 'generated', 'ldm', 'v11_phaseB_full')
 
 print("=" * 60)
 print("CLASSIFIER ACCURACY")

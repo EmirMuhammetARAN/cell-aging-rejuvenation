@@ -27,22 +27,21 @@ torch.backends.cudnn.allow_tf32 = True
 torch.set_float32_matmul_precision('medium')
 torch._dynamo.config.cache_size_limit = 64
 
-EXPERIMENT_NAME = "v9_scratch_v6"  
-
+EXPERIMENT_NAME = "v11_custom_vae_250"
 if __name__ == "__main__":
 
     BATCH_SIZE = 4  
     VAL_BATCH_SIZE = 1
-    NUM_EPOCHS = 150
+    NUM_EPOCHS = 250
     WARMUP_EPOCHS = 5
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-    LR = 1e-4
+    LR = 2e-4
     GRADIENT_ACCUMULATION_STEPS = 4  
     USE_BFLOAT16 = True
     MAX_GRAD_NORM = 1.0
-    VAL_FREQ = 10
-    CHECKPOINT_EPOCHS = (10, 25, 50, 75, 100, 125, 150) 
-    LPIPS_WEIGHT = 0.03 
+    VAL_FREQ = 5
+    CHECKPOINT_EPOCHS = (50, 100, 150, 200, 250)
+    LPIPS_WEIGHT = 0.0 
 
     train_transform = transforms.Compose([
         transforms.RandomHorizontalFlip(),
@@ -75,11 +74,10 @@ if __name__ == "__main__":
 
     OUTPUT_DIR = os.path.join(root_dir, 'checkpoints', 'ldm')
     RESULTS_DIR = os.path.join(root_dir, 'results', 'generated', 'ldm', EXPERIMENT_NAME)
-
     CHECKPOINT_DIR = OUTPUT_DIR
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     os.makedirs(RESULTS_DIR, exist_ok=True)
-
+    
     best_val_loss = float('inf')
     start_epoch = 0
 
@@ -102,10 +100,10 @@ if __name__ == "__main__":
         gc.collect()
         print(f"Resumed from epoch {start_epoch}, best_val_loss: {best_val_loss:.4f}")
     else:
-        print("Starting from scratch (no checkpoint found)")
+        print("Starting from scratch (no checkpoint found for v10_custom_vae_lpips)")
 
-    train_dataset = LDMDataset(root_dir=root_dir, split='train', transform=train_transform, data_version='processed_v6')
-    val_dataset = LDMDataset(root_dir=root_dir, split='test', transform=val_transform, data_version='processed_v6')
+    train_dataset = LDMDataset(root_dir=root_dir, split='train', transform=train_transform, data_version='processed_v2')
+    val_dataset = LDMDataset(root_dir=root_dir, split='test', transform=val_transform, data_version='processed_v2')
 
     young_count = train_dataset.labels.count(0)
     senes_count = train_dataset.labels.count(1)
@@ -175,9 +173,9 @@ if __name__ == "__main__":
             senescent_labels = torch.ones(4, dtype=torch.long, device=DEVICE)
 
             torch.cuda.empty_cache()
-            young_samples = model.sample(num_samples=4, device=DEVICE, labels=young_labels, use_ema=use_ema, guidance_scale=2.0).cpu()
+            young_samples = model.sample(num_samples=4, device=DEVICE, labels=young_labels, use_ema=use_ema, guidance_scale=3.0, num_steps=50).cpu()
             torch.cuda.empty_cache()
-            senescent_samples = model.sample(num_samples=4, device=DEVICE, labels=senescent_labels, use_ema=use_ema, guidance_scale=2.0).cpu()
+            senescent_samples = model.sample(num_samples=4, device=DEVICE, labels=senescent_labels, use_ema=use_ema, guidance_scale=3.0, num_steps=50).cpu()
             torch.cuda.empty_cache()
 
             save_dir = RESULTS_DIR
@@ -197,11 +195,13 @@ if __name__ == "__main__":
 
                 if young_img is not None and senescent_img is not None:
                     target_senes = torch.ones(1, dtype=torch.long, device=DEVICE)
-                    translated_senes = model.translate(young_img, target_senes, strength=0.85, use_ema=use_ema, guidance_scale=2.5).cpu()
+                    # 3. DEĞİŞİKLİK: AGING ŞAMPİYON AYARLARI (strength 0.70, cfg 4.0)
+                    translated_senes = model.translate(young_img, target_senes, strength=0.70, use_ema=use_ema, guidance_scale=4.0).cpu()
                     torch.cuda.empty_cache()
 
                     target_young = torch.zeros(1, dtype=torch.long, device=DEVICE)
-                    translated_young = model.translate(senescent_img, target_young, strength=0.75, use_ema=use_ema, guidance_scale=2.0).cpu()
+                    # 3. DEĞİŞİKLİK: REJUVENATION ŞAMPİYON AYARLARI (strength 0.65, cfg 3.0)
+                    translated_young = model.translate(senescent_img, target_young, strength=0.65, use_ema=use_ema, guidance_scale=3.0).cpu()
                     torch.cuda.empty_cache()
 
                     young_orig_vis = (young_img.clamp(-1, 1) + 1) / 2

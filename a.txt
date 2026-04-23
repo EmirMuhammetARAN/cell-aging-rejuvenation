@@ -16,3 +16,13 @@ seval.kupcu@gmail.com
 
 
 
+patch gan cnn, örneklem(lpips mse) görsel kaliten artar lpips 
+
+cyclegan 
+
+eski veri olmıcak şekilde bak
+
+batuhan ankara üniversitesi
+
+fid mantıklı dediği 
+yan etki anlayıcı

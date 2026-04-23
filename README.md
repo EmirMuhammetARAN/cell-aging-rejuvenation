@@ -1,117 +1,19 @@
-# cell-aging-rejuvenation
-Deep learning pipeline for simulating MSC cellular senescence and rejuvenation using CycleGAN and Latent Diffusion Models with LoRA fine-tuning.
+# self_supervised_learning_medical_image
 
-## Setup & Installation
+We share the codes for a Self-Supervised Learning (SSL) based method to segment and quantify the density of cellular senescence which can perform efficiently even with the limited size of dataset which is acquired from bright-field microscopy. We incorporated A Simple Framework for Contrastive Learning of Visual Representations(SimCLR) into the conventional instance segmentation algorithm, Mask R-CNN. In the SSL part, we trained ResNet-101 backbone with our unlabeled dataset by using SimCLR. Then, we used it in the downstream task with a labeled, smaller dataset consisting of unstained cell images.
+![image](https://user-images.githubusercontent.com/97739552/170995679-4385caaf-95be-40e2-940b-c9ee3ef7a9f7.png)
 
-### 1. Clone the repository
-```bash
-git clone https://github.com/EmirMuhammetARAN/cell-aging-rejuvenation.git
-cd dataset_senescence
-```
 
-### 2. Install as a package (Recommended)
-```bash
-# Development mode (editable install)
-pip install -e .
-```
+We also share the pre-trained ResNet-101 models under pretrained_model folder. Here you can find and download different models which is pre-trained with different batch size or different approaches. These pretrained models can be used during transfer learning technique on medical images. All models have the same epoch which is 200 for our study. 
 
-Or install dependencies manually:
-```bash
-pip install -r requirements.txt
-```
+Besides, you can use the codes for your own custom dataset by giving the image folder path while unsupervised pretraining and then fine-tuning for Mask R-CNN.
+# Dataset
+You can find labeled dataset in the given link;
+https://drive.google.com/file/d/1t2WeFqSdKww4-mPKwsue5bns6lW0gv9N/view?usp=drive_link
+# Citation
+Please use below to cite this paper if you find this repository useful or if you use pretrained models shared here in your research.
 
-### 3. Run scripts from root directory
-```bash
-# IMPORTANT: Always run from project root directory
-cd /path/to/dataset_senescence
+Çelebi F, Boyvat D, Ayaz-Guner S, Tasdemir K, Icoz K. Improved senescent cell segmentation on bright-field microscopy images exploiting representation level contrastive learning. Int J Imaging Syst Technol. 2024; 34(2):e23052. doi:10.1002/ima.23052
 
-# Training
-python src/training/cyclegan/train_cyclegan.py
-python src/training/classifier/train_classifier.py
-python src/training/ldm/train_ldm.py
-
-# Inference
-python src/inference/cyclegan/generate_all.py
-python src/inference/classifier/evaluate_classifier.py
-```
-
-## Project Structure
-
-```
-models/              # Model architectures (reusable)
-├── cyclegan/       # CycleGAN generator, discriminator
-├── classifier/     # Image classifier
-└── ldm/            # Latent Diffusion Model
-
-src/
-├── data/           # Data utilities & loaders
-├── training/       # Training scripts
-│   ├── cyclegan/
-│   ├── classifier/
-│   └── ldm/
-├── inference/      # Inference & evaluation scripts
-│   ├── cyclegan/
-│   ├── classifier/
-│   └── ldm/
-└── evaluation/     # Evaluation metrics
-
-data/               # Dataset
-├── processed/      # Processed images
-│   ├── train/
-│   └── test/
-└── raw/           # Raw images
-
-checkpoints/        # Saved model weights
-├── cyclegan/
-├── classifier/
-└── ldm/
-
-results/            # Generated outputs
-```
-
-## Training
-
-### CycleGAN
-```bash
-python src/training/cyclegan/train_cyclegan.py
-```
-
-### Image Classifier
-```bash
-python src/training/classifier/train_classifier.py
-```
-
-### Latent Diffusion Model
-```bash
-python src/training/ldm/train_ldm.py
-```
-
-## Inference
-
-### Generate aged/rejuvenated images
-```bash
-python src/inference/cyclegan/generate_all.py
-```
-
-### Evaluate classifier
-```bash
-python src/inference/classifier/evaluate_classifier.py
-```
-
-## Troubleshooting
-
-### Import errors
-If you get `ModuleNotFoundError`, ensure:
-1. You're running from the project root directory
-2. You've installed the package: `pip install -e .`
-3. Or set PYTHONPATH: `export PYTHONPATH="${PYTHONPATH}:$(pwd)"`
-
-### CUDA/GPU issues
-Check if CUDA is available:
-```python
-import torch
-print(torch.cuda.is_available())
-```
-
-### Missing data
-Ensure data structure is set up correctly in `data/processed/train/young`, `data/processed/train/senescent`, etc.
+# Results 
+![image](https://user-images.githubusercontent.com/97739552/170995870-3e72948e-1a71-4712-a0b0-a8a52dd26876.png)

@@ -18,12 +18,12 @@ DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 TEST_YOUNG_DIR = os.path.join(root_dir, 'data', 'processed_v6', 'test', 'young')
 TEST_SENESCENT_DIR = os.path.join(root_dir, 'data', 'processed_v6', 'test', 'senescent')
-OUTPUT_DIR = os.path.join(root_dir, 'results', 'generated', 'ldm_diffusers_v7')
+OUTPUT_DIR = os.path.join(root_dir, 'results', 'generated', 'ldm_v6_tightcrop')
 
 os.makedirs(os.path.join(OUTPUT_DIR, 'aging'), exist_ok=True)
 os.makedirs(os.path.join(OUTPUT_DIR, 'rejuvenation'), exist_ok=True)
 os.makedirs(os.path.join(OUTPUT_DIR, 'random_samples_young'), exist_ok=True)
-os.makedirs(os.path.join(OUTPUT_DIR, 'random_sampes_senescent'), exist_ok=True)
+os.makedirs(os.path.join(OUTPUT_DIR, 'random_samples_senescent'), exist_ok=True)
 
 transform = transforms.Compose([
     transforms.ToTensor(),

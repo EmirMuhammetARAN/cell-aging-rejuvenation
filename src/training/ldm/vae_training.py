@@ -13,12 +13,18 @@ from models.ldm.ldm_dataset import LDMDataset
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
+# Speed optimizations
+torch.backends.cudnn.benchmark = True
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+torch.set_float32_matmul_precision('medium')
+
 DEVICE = 'cuda'
 LR_ENCODER = 5e-6  
 LR_DECODER = 1e-5  
 EPOCHS = 20
-BATCH_SIZE = 1
-GRAD_ACCUM = 8
+BATCH_SIZE = 2
+GRAD_ACCUM = 4
 OUTPUT_DIR = os.path.join(root_dir, 'checkpoints', 'vae_finetuned')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(os.path.join(OUTPUT_DIR, 'visuals'), exist_ok=True)
@@ -33,22 +39,29 @@ if __name__ == '__main__':
         root_dir=root_dir, 
         split='train', 
         transform=transform, 
-        data_version='processed_v6'
+        data_version='processed_v2'
     )
     dataloader = DataLoader(
         dataset, 
-        batch_size=BATCH_SIZE, 
+        batch_size=BATCH_SIZE,  # Bu 4 kalsın, sorun bunda değil
         shuffle=True, 
-        num_workers=0
+        num_workers=0,          # İŞÇİLERİ KOVDUK (Windows için güvenli mod)
+        # persistent_workers=True, -> BUNU DA SİL
+        pin_memory=True         # Bu kalabilir
     )
 
-    vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse")
-    vae.to(DEVICE)
+    vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse", local_files_only=True)
+    vae.to(DEVICE, memory_format=torch.channels_last)
+
+    # Gradient checkpointing: bellek tasarrufu -> daha hızlı step'ler
+    vae.enable_gradient_checkpointing()
 
     vae.encoder.requires_grad_(True)
     vae.decoder.requires_grad_(True)
     vae.quant_conv.requires_grad_(True)
     vae.post_quant_conv.requires_grad_(True)
+
+    # torch.compile 4080 Mobile'da SM yetersizliğinden takılıyor, atlandı
 
     optimizer = torch.optim.AdamW([
         {'params': vae.encoder.parameters(),         'lr': LR_ENCODER},
@@ -79,7 +92,7 @@ if __name__ == '__main__':
                 z = posterior.sample()
                 recon = vae.decode(z).sample
                 
-                recon_loss = F.l1_loss(recon, images)
+                recon_loss = F.mse_loss(recon, images)
                 kl_loss = posterior.kl().mean() * 1e-6
                 loss = (recon_loss + kl_loss) / GRAD_ACCUM
             
@@ -91,7 +104,6 @@ if __name__ == '__main__':
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad()
-                torch.cuda.empty_cache()
             
             total_recon += recon_loss.item()
             total_kl += kl_loss.item()
@@ -99,8 +111,8 @@ if __name__ == '__main__':
                 recon=f"{total_recon/(step+1):.4f}",
                 kl=f"{total_kl/(step+1):.6f}"
             )
-        
         avg_loss = (total_recon + total_kl) / len(dataloader)
+        torch.cuda.empty_cache()  # Epoch sonu bellek temizliği (fragmentation önleme)
         print(f"Epoch {epoch+1} | Recon: {total_recon/len(dataloader):.4f} | "
               f"KL: {total_kl/len(dataloader):.6f}")
         

@@ -10,9 +10,9 @@ class CellLDM(nn.Module):
         super().__init__()
 
         if vae_path is not None:
-            self.vae = AutoencoderKL.from_pretrained(vae_path)
+            self.vae = AutoencoderKL.from_pretrained(vae_path, local_files_only=True)
         else:
-            self.vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse")
+            self.vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse", local_files_only=True)
 
         self.num_classes = num_classes
         self.cfg_drop_prob = cfg_drop_prob
@@ -58,7 +58,9 @@ class CellLDM(nn.Module):
         )
         
         self.vae.requires_grad_(False)
-        self.scaling_factor = 0.18215
+        # Pretrained SD VAE: latent std ~5.5, scale by 0.18215 to normalize
+        # Custom fine-tuned VAE: latent std ~1.0, no scaling needed
+        self.scaling_factor = 1.0 if vae_path is not None else 0.18215
 
         self.ema_unet = None
         self.ema_decay = 0.999
