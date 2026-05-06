@@ -17,10 +17,10 @@ from models.ldm.model_lpips import CellLDM
 from models.classifier.classifier import Classifier
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--aging_strength', type=float, default=0.7)
-parser.add_argument('--aging_cfg', type=float, default=4.0)
-parser.add_argument('--reju_strength', type=float, default=0.65)
-parser.add_argument('--reju_cfg', type=float, default=3.0)
+parser.add_argument('--aging_strength', type=float, default=0.8)
+parser.add_argument('--aging_cfg', type=float, default=5.0)
+parser.add_argument('--reju_strength', type=float, default=0.7)
+parser.add_argument('--reju_cfg', type=float, default=4.0)
 parser.add_argument('--steps', type=int, default=50)
 args = parser.parse_args()
 
@@ -34,9 +34,9 @@ print(f"{'='*60}\n")
 torch.backends.cudnn.benchmark = True
 torch.backends.cuda.matmul.allow_tf32 = True
 
-CHECKPOINT = os.path.join(root_dir, 'checkpoints', 'ldm', 'best_model_v2_lpips_ft.pt')
-TEST_YOUNG = os.path.join(root_dir, 'data', 'processed_v2', 'test', 'young')
-TEST_SENES = os.path.join(root_dir, 'data', 'processed_v2', 'test', 'senescent')
+CHECKPOINT = os.path.join(root_dir, 'checkpoints', 'ldm', 'best_model_v12_v3_data.pt')
+TEST_YOUNG = os.path.join(root_dir, 'data', 'processed_v3', 'test', 'young')
+TEST_SENES = os.path.join(root_dir, 'data', 'processed_v3', 'test', 'senescent')
 OUTPUT_DIR = os.path.join(root_dir, 'results', 'generated', 'ldm', f'sweep_{tag}')
 os.makedirs(os.path.join(OUTPUT_DIR, 'aging'), exist_ok=True)
 os.makedirs(os.path.join(OUTPUT_DIR, 'rejuvenation'), exist_ok=True)
@@ -48,6 +48,7 @@ transform = transforms.Compose([
 
 # Load LDM (pretrained VAE, no custom vae_path)
 model = CellLDM(num_classes=2, lpips_weight=0.0)
+model.scaling_factor = 0.18215
 model.to('cuda', memory_format=torch.channels_last)
 model.vae.to(memory_format=torch.channels_last)
 model.init_ema()
