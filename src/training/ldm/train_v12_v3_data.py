@@ -28,7 +28,7 @@ torch.set_float32_matmul_precision('medium')
 torch._dynamo.config.cache_size_limit = 64
 
 # ===== EXPERIMENT CONFIG =====
-EXPERIMENT_NAME = "v12_v3_data"
+EXPERIMENT_NAME = "v12_v4_data"
 # =============================
 if __name__ == "__main__":
 
@@ -138,8 +138,8 @@ if __name__ == "__main__":
     else:
         print("Starting from scratch (no checkpoint found for v10_custom_vae_lpips)")
 
-    train_dataset = LDMDataset(root_dir=root_dir, split='train', transform=train_transform, data_version='processed_v3')
-    val_dataset = LDMDataset(root_dir=root_dir, split='test', transform=val_transform, data_version='processed_v3')
+    train_dataset = LDMDataset(root_dir=root_dir, split='train', transform=train_transform, data_version='processed_v4')
+    val_dataset = LDMDataset(root_dir=root_dir, split='test', transform=val_transform, data_version='processed_v4')
 
     young_count = train_dataset.labels.count(0)
     senes_count = train_dataset.labels.count(1)
