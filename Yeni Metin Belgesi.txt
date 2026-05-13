@@ -9,10 +9,12 @@
 
 "Adversarial (GAN tabanlı) eğitim kullanan TÜM modeller instabildir. Sorun CycleGAN'a özel değil, GAN paradigmasının kendisine aittir. LDM bu sorunu tamamen ortadan kaldırır çünkü eğitimde hiç discriminator kullanmaz."
 
-
+v3
 ============================================================
 SUMMARY: as0.8_ac5.0_rs0.7_rc4.0
 Aging:  strength=0.8 CFG=5.0 -> ACC=96.94% FID=49.31
 Reju:   strength=0.7 CFG=4.0 -> ACC=97.17% FID=57.83
 ============================================================
 PS C:\Users\emir_\Documents\GitHub\Yeni dizin\dataset_senescence> 
+
+"LPIPS ince ayarı, v2 varyasyonunda FID'i iyileştirirken, v4'te anlamlı bir iyileşme sağlamamıştır. Bu bulgu, yeterince büyük ve temiz etiketli veri setinin, algısal kayıp fonksiyonlarına olan ihtiyacı ortadan kaldırabileceğini göstermektedir."

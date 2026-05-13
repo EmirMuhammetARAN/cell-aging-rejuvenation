@@ -34,9 +34,9 @@ print(f"{'='*60}\n")
 torch.backends.cudnn.benchmark = True
 torch.backends.cuda.matmul.allow_tf32 = True
 
-CHECKPOINT = os.path.join(root_dir, 'checkpoints', 'ldm', 'best_model_v12_v3_data.pt')
-TEST_YOUNG = os.path.join(root_dir, 'data', 'processed_v3', 'test', 'young')
-TEST_SENES = os.path.join(root_dir, 'data', 'processed_v3', 'test', 'senescent')
+CHECKPOINT = os.path.join(root_dir, 'checkpoints', 'ldm', 'best_model_v12_v4_data.pt')
+TEST_YOUNG = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'young')
+TEST_SENES = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'senescent')
 OUTPUT_DIR = os.path.join(root_dir, 'results', 'generated', 'ldm', f'sweep_{tag}')
 os.makedirs(os.path.join(OUTPUT_DIR, 'aging'), exist_ok=True)
 os.makedirs(os.path.join(OUTPUT_DIR, 'rejuvenation'), exist_ok=True)
@@ -63,27 +63,39 @@ model.eval()
 
 # === AGING (young -> senescent) ===
 print(f"\n[1/2] Aging: {len(os.listdir(TEST_YOUNG))} images")
+skipped_aging = 0
 for img_name in tqdm(sorted(os.listdir(TEST_YOUNG)), desc="Aging"):
+    out_path = os.path.join(OUTPUT_DIR, 'aging', img_name)
+    if os.path.exists(out_path):
+        skipped_aging += 1
+        continue
     img = transform(Image.open(os.path.join(TEST_YOUNG, img_name)).convert('RGB'))
     img = img.unsqueeze(0).to('cuda', memory_format=torch.channels_last)
     with torch.no_grad():
         out = model.translate(img, target_labels=torch.tensor([1], device='cuda'),
                               strength=args.aging_strength, num_steps=args.steps,
                               use_ema=True, guidance_scale=args.aging_cfg)
-    save_image(out.cpu(), os.path.join(OUTPUT_DIR, 'aging', img_name))
+    save_image(out.cpu(), out_path)
     torch.cuda.empty_cache()
+if skipped_aging: print(f"  Skipped {skipped_aging} existing aging images")
 
 # === REJUVENATION (senescent -> young) ===
 print(f"\n[2/2] Rejuvenation: {len(os.listdir(TEST_SENES))} images")
+skipped_reju = 0
 for img_name in tqdm(sorted(os.listdir(TEST_SENES)), desc="Reju"):
+    out_path = os.path.join(OUTPUT_DIR, 'rejuvenation', img_name)
+    if os.path.exists(out_path):
+        skipped_reju += 1
+        continue
     img = transform(Image.open(os.path.join(TEST_SENES, img_name)).convert('RGB'))
     img = img.unsqueeze(0).to('cuda', memory_format=torch.channels_last)
     with torch.no_grad():
         out = model.translate(img, target_labels=torch.tensor([0], device='cuda'),
                               strength=args.reju_strength, num_steps=args.steps,
                               use_ema=True, guidance_scale=args.reju_cfg)
-    save_image(out.cpu(), os.path.join(OUTPUT_DIR, 'rejuvenation', img_name))
+    save_image(out.cpu(), out_path)
     torch.cuda.empty_cache()
+if skipped_reju: print(f"  Skipped {skipped_reju} existing rejuvenation images")
 
 del model; torch.cuda.empty_cache(); gc.collect()
 
