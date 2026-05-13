@@ -18,3 +18,13 @@ Reju:   strength=0.7 CFG=4.0 -> ACC=97.17% FID=57.83
 PS C:\Users\emir_\Documents\GitHub\Yeni dizin\dataset_senescence> 
 
 "LPIPS ince ayarı, v2 varyasyonunda FID'i iyileştirirken, v4'te anlamlı bir iyileşme sağlamamıştır. Bu bulgu, yeterince büyük ve temiz etiketli veri setinin, algısal kayıp fonksiyonlarına olan ihtiyacı ortadan kaldırabileceğini göstermektedir."
+
+
+hoca şey dedi cyclegan ve ldmi açıkla detaylı ve bunun nasıl iş yaptığını anlatan ana maakelden bir resim koy dedi onu koyalım 
+
+onun dışında veri seti kısmında ilk verilerimde 100 adet 1944 2592 çözünülrüpünde 100 tane resim di ama via project doısyası ile hem label hem segemente olmuştu
+
+ve mask rcnn i ben eğittmedin fatma hocanın amkalede kullandğı ağırşıkları aldım 
+
+cyclegande steps olmadığı cutgan denendiğini gene de de bu döngüsel tutarlılık yok cycle consistency deniyor gailba sürekli dalgalı ondan daha detaylı bahsedek
+
