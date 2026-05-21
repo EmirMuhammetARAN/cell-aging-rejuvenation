@@ -63,7 +63,7 @@ def create_figure(task, input_dir, cyclegan_dir, ldm_dir, title, output_name):
     draw.text(((width - tw) // 2, 8), title, fill='black', font=title_font)
     
     labels = [
-        (f"Input ({task})", 'input'),
+        (f"Girdi ({task})", 'input'),
         ("CycleGAN v2", 'cyclegan'),
         ("LDM v4", 'ldm'),
     ]
@@ -98,17 +98,17 @@ if __name__ == "__main__":
     print("Creating thesis figures (CycleGAN v2 vs LDM v4 FID-optimized)...\n")
     
     # Figure 1: Aging (Young -> Senescent)
-    input_label = "Young"
+    input_label = "Genç"
     create_figure(
         input_label, TEST_YOUNG, CYCLEGAN_AGING, LDM_AGING,
-        "AGING (Young -> Senescent)", "figure1_aging_v2.png"
+        "YAŞLANMA (Genç -> Yaşlı)", "figure1_aging_v2.png"
     )
     
     # Figure 2: Rejuvenation (Senescent -> Young)
-    input_label = "Senescent"
+    input_label = "Yaşlı"
     create_figure(
         input_label, TEST_SENES, CYCLEGAN_REJU, LDM_REJU,
-        "REJUVENATION (Senescent -> Young)", "figure2_rejuvenation_v2.png"
+        "GENÇLEŞTİRME (Yaşlı -> Genç)", "figure2_rejuvenation_v2.png"
     )
     
     print("\nDone!")

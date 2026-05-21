@@ -20,7 +20,7 @@ except:
     font = ImageFont.load_default()
 
 # Headers
-for i, (label, color) in enumerate([("Young Cells", (52, 168, 83)), ("Senescent Cells", (234, 67, 53))]):
+for i, (label, color) in enumerate([("Genç Hücreler", (52, 168, 83)), ("Yaşlı Hücreler", (234, 67, 53))]):
     x = i * (w + gap)
     draw.rectangle([x, 0, x + w, header], fill=color)
     bbox = draw.textbbox((0, 0), label, font=font)
