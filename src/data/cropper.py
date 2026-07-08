@@ -39,23 +39,23 @@ class Cropper:
             mid_x = (max(points_x) + min(points_x)) // 2
             mid_y = (max(points_y) + min(points_y)) // 2
 
-            dynamic_crop, cell_size = self._get_dynamic_crop_size(points_x, points_y)
+            # Sabit crop size
+            crop_window = self.crop_size
+            half = crop_window // 2
 
             # Görüntü kırpma alanından küçükse atla
-            if img_w < dynamic_crop or img_h < dynamic_crop:
-                print(f"  ⚠ Skip: {filename} görüntü çok küçük "
-                      f"({img_w}x{img_h} < {dynamic_crop}px)")
+            if img_w < crop_window or img_h < crop_window:
+                print(f"  [WARN] Skip: {filename} görüntü çok küçük "
+                      f"({img_w}x{img_h} < {crop_window}px)")
                 skipped += 1
                 continue
-
-            half = dynamic_crop // 2
 
             left   = mid_x - half
             top    = mid_y - half
             right  = mid_x + half
             bottom = mid_y + half
 
-            # Taşıyorsa kaydır → hücre merkezde olmaz ama siyah boşluk da olmaz
+            # Taşıyorsa kaydır → hücre merkezde olmaz ama siyah boşluk da olmaz (Dinamik zoom yok)
             if left < 0:
                 right -= left   
                 left = 0
@@ -69,10 +69,8 @@ class Cropper:
                 top -= (bottom - img_h)
                 bottom = img_h
 
-            # Burası önemli: Önce hücreye sıfıra sıfır (ufak bir payla) crop atıyor
+            # Tam 512x512 kesiyoruz, resize YOK
             region = img.crop((left, top, right, bottom))
-            # Sonra o kestiği boyutu (örneğin 50x50'yi) alıp 512x512'ye sündürüp büyütüyor
-            region = region.resize((self.crop_size, self.crop_size), Image.LANCZOS)
 
             save_path = os.path.join(
                 self.processed_path, label,
@@ -82,8 +80,7 @@ class Cropper:
 
             if counter % 100 == 0:
                 print(f"  [{counter}] {filename} | "
-                      f"hücre: {cell_size}px | "
-                      f"crop: {dynamic_crop}px → {self.crop_size}px")
+                      f"crop: {crop_window}px sabit")
             counter += 1
 
         print(f"\nToplam: {counter} kaydedildi, {skipped} skip edildi")

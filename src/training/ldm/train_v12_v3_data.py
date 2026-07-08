@@ -270,7 +270,7 @@ if __name__ == "__main__":
         else:
             print(f"Epoch {epoch+1} | Train Loss: {avg_train_loss:.4f}")
 
-        if (epoch + 1) in CHECKPOINT_EPOCHS:
+        if (epoch + 1) % 5 == 0:
             ckpt_path = os.path.join(CHECKPOINT_DIR, f'checkpoint_{EXPERIMENT_NAME}_epoch_{epoch+1}.pt')
             torch.save({
                 'epoch': epoch + 1,
@@ -280,5 +280,22 @@ if __name__ == "__main__":
                 'lr_scheduler_state_dict': lr_scheduler.state_dict(),
             }, ckpt_path)
             print(f"  ✓ Checkpoint kaydedildi: epoch_{epoch+1}.pt")
+            
+            # Delete older checkpoints to save space (but keep milestone epochs)
+            old_checkpoints = glob.glob(os.path.join(CHECKPOINT_DIR, f'checkpoint_{EXPERIMENT_NAME}_epoch_*.pt'))
+            import re
+            for old_ckpt in old_checkpoints:
+                if old_ckpt != ckpt_path:
+                    try:
+                        match = re.search(r'epoch_(\d+)\.pt', old_ckpt)
+                        if match:
+                            old_epoch = int(match.group(1))
+                            if old_epoch in CHECKPOINT_EPOCHS:
+                                continue # Don't delete milestone checkpoints (50, 100, 150...)
+                        
+                        os.remove(old_ckpt)
+                        print(f"  ✓ Eski checkpoint silindi (Milestone olmadığı için): {os.path.basename(old_ckpt)}")
+                    except Exception:
+                        pass
 
     print("Eğitim tamamlandı!")

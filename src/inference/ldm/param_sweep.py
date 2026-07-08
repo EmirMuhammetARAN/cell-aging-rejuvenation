@@ -34,7 +34,7 @@ print(f"{'='*60}\n")
 torch.backends.cudnn.benchmark = True
 torch.backends.cuda.matmul.allow_tf32 = True
 
-CHECKPOINT = os.path.join(root_dir, 'checkpoints', 'ldm', 'best_model_v1.pt')
+CHECKPOINT = os.path.join(root_dir, 'checkpoints', 'ldm', 'checkpoint_v12_v4_data_lpips_last.pt')
 TEST_YOUNG = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'young')
 TEST_SENES = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'senescent')
 OUTPUT_DIR = os.path.join(root_dir, 'results', 'generated', 'ldm', f'sweep_{tag}')

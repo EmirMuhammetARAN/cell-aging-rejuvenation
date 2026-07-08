@@ -1,6 +1,5 @@
 """
 Cell Aging & Rejuvenation Demo - Gradio Interface
-Hucre Yaslandirma ve Genclestirme Interaktif Demo
 """
 import os, sys, torch, gc
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -21,9 +20,9 @@ from models.classifier.classifier import Classifier
 
 # ===== CONFIG =====
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-CHECKPOINT = os.path.join(root_dir, 'checkpoints', 'ldm', 'best_model_v12_v4_data.pt')
+CHECKPOINT = os.path.join(root_dir, 'checkpoints', 'ldm', 'checkpoint_v12_v4_data_lpips_last.pt')
 CLASSIFIER_PATH = os.path.join(root_dir, 'checkpoints', 'classifier', 'classifier_v2.pth')
-CLASS_NAMES = {0: 'Yaşlı', 1: 'Genç'}
+CLASS_NAMES = {0: 'Senescent', 1: 'Young'}
 
 # ===== MODEL LOADING =====
 print("Loading LDM model...", flush=True)
@@ -89,7 +88,7 @@ cls_transform = transforms.Compose([
 def classify_cell(image):
     """Classify a cell image and return GradCAM overlay"""
     if image is None:
-        return None, "Resim yüklenmedi"
+        return None, "Image not loaded"
     
     img = Image.fromarray(image).convert('RGB').resize((512, 512))
     img_np = np.array(img)
@@ -109,7 +108,7 @@ def classify_cell(image):
     label = CLASS_NAMES[pred_class]
     confidence = probs[pred_class] * 100
     
-    result_text = f"Tahmin: {label}\nGüven: {confidence:.1f}%\n\nGenç: {probs[1]*100:.1f}%\nYaşlı: {probs[0]*100:.1f}%"
+    result_text = f"Prediction: {label}\nConfidence: {confidence:.1f}%\n\nYoung: {probs[1]*100:.1f}%\nSenescent: {probs[0]*100:.1f}%"
     
     return overlay, result_text
 
@@ -117,7 +116,7 @@ def classify_cell(image):
 def translate_cell(image, direction, strength, cfg_scale, num_steps):
     """Translate cell between young and senescent states"""
     if image is None:
-        return None, None, "Resim yüklenmedi"
+        return None, None, "Image not loaded"
     
     img = Image.fromarray(image).convert('RGB').resize((512, 512))
     img_np = np.array(img)
@@ -125,7 +124,7 @@ def translate_cell(image, direction, strength, cfg_scale, num_steps):
     # LDM translation
     input_tensor = ldm_transform(img).unsqueeze(0).to(DEVICE, memory_format=torch.channels_last)
     
-    if direction == "Yaşlandırma (Genç -> Yaşlı)":
+    if direction == "Aging (Young -> Senescent)":
         target_label = torch.tensor([1], device=DEVICE)  # LDM: 1 = Senescent
     else:
         target_label = torch.tensor([0], device=DEVICE)  # LDM: 0 = Young
@@ -154,15 +153,15 @@ def translate_cell(image, direction, strength, cfg_scale, num_steps):
     out_class = CLASS_NAMES[out_pred.argmax()]
     
     result_text = (
-        f"--- ORİJİNAL ---\n"
-        f"Sınıf: {orig_class}\n"
-        f"Genç: {orig_pred[1]*100:.1f}% | Yaşlı: {orig_pred[0]*100:.1f}%\n\n"
-        f"--- ÇEVRİLENDİ ---\n"
-        f"Sınıf: {out_class}\n"
-        f"Genç: {out_pred[1]*100:.1f}% | Yaşlı: {out_pred[0]*100:.1f}%\n\n"
-        f"--- PARAMETRELER ---\n"
-        f"Yön: {direction}\n"
-        f"Güç: {strength} | CFG: {cfg_scale} | Adım: {int(num_steps)}"
+        f"--- ORIGINAL ---\n"
+        f"Class: {orig_class}\n"
+        f"Young: {orig_pred[1]*100:.1f}% | Senescent: {orig_pred[0]*100:.1f}%\n\n"
+        f"--- TRANSLATED ---\n"
+        f"Class: {out_class}\n"
+        f"Young: {out_pred[1]*100:.1f}% | Senescent: {out_pred[0]*100:.1f}%\n\n"
+        f"--- PARAMETERS ---\n"
+        f"Direction: {direction}\n"
+        f"Strength: {strength} | CFG: {cfg_scale} | Steps: {int(num_steps)}"
     )
     
     torch.cuda.empty_cache()
@@ -172,7 +171,7 @@ def translate_cell(image, direction, strength, cfg_scale, num_steps):
 
 def random_generate(cell_type, num_steps):
     """Generate random cell images from scratch"""
-    if cell_type == "Genç":
+    if cell_type == "Young":
         labels = torch.zeros(4, dtype=torch.long, device=DEVICE)   # LDM: 0 = Young
     else:
         labels = torch.ones(4, dtype=torch.long, device=DEVICE)    # LDM: 1 = Senescent
@@ -197,33 +196,33 @@ def random_generate(cell_type, num_steps):
 
 
 # ===== GRADIO INTERFACE =====
-with gr.Blocks(title="Hücre Yaşlandırma ve Gençleştirme - Yapay Zeka Demosu") as demo:
+with gr.Blocks(title="Cell Aging & Rejuvenation - AI Demo") as demo:
     
     gr.Markdown("""
-    # Hücre Yaşlandırma & Gençleştirme AI Demosu
-    ### Latent Diffusion Model ile Hücresel Yaşlandırma ve Gençleştirme Simülasyonu
+    # Cell Aging & Rejuvenation AI Demo
+    ### Cellular Aging and Rejuvenation Simulation via Latent Diffusion Model
     """)
     
     with gr.Tabs():
         # Tab 1: Translation
-        with gr.TabItem("Hücre Çevirisi (Dönüşüm)"):
-            gr.Markdown("SDEdit kullanarak bir hücre görüntüsünü yaşlandırmak veya gençleştirmek için yükleyin.")
+        with gr.TabItem("Cell Translation"):
+            gr.Markdown("Upload a cell image to age or rejuvenate it using SDEdit.")
             with gr.Row():
                 with gr.Column(scale=1):
-                    input_img = gr.Image(label="Girdi Hücre Görüntüsü", type="numpy")
+                    input_img = gr.Image(label="Input Cell Image", type="numpy")
                     direction = gr.Radio(
-                        ["Yaşlandırma (Genç -> Yaşlı)", "Gençleştirme (Yaşlı -> Genç)"],
-                        label="Yön", value="Yaşlandırma (Genç -> Yaşlı)"
+                        ["Aging (Young -> Senescent)", "Rejuvenation (Senescent -> Young)"],
+                        label="Direction", value="Aging (Young -> Senescent)"
                     )
                     with gr.Row():
-                        strength = gr.Slider(0.3, 1.0, value=0.8, step=0.05, label="Gürültü Giderme Gücü (Strength)")
-                        cfg = gr.Slider(1.0, 10.0, value=5.0, step=0.5, label="CFG Ölçeği")
-                    steps = gr.Slider(20, 100, value=50, step=10, label="Adım Sayısı")
-                    translate_btn = gr.Button("Dönüştür!", variant="primary")
+                        strength = gr.Slider(0.3, 1.0, value=0.8, step=0.05, label="Denoising Strength")
+                        cfg = gr.Slider(1.0, 10.0, value=5.0, step=0.5, label="CFG Scale")
+                    steps = gr.Slider(20, 100, value=50, step=10, label="Number of Steps")
+                    translate_btn = gr.Button("Translate!", variant="primary")
                 
                 with gr.Column(scale=1):
-                    output_img = gr.Image(label="Dönüştürülmüş Hücre")
-                    result_text = gr.Textbox(label="Sınıflandırma Sonuçları", lines=10)
+                    output_img = gr.Image(label="Translated Cell")
+                    result_text = gr.Textbox(label="Classification Results", lines=10)
             
             translate_btn.click(
                 translate_cell,
@@ -232,15 +231,15 @@ with gr.Blocks(title="Hücre Yaşlandırma ve Gençleştirme - Yapay Zeka Demosu
             )
         
         # Tab 2: Classification + GradCAM
-        with gr.TabItem("Sınıflandırma + GradCAM"):
-            gr.Markdown("Bir hücre görüntüsünü sınıflandırmak ve modelin nerelere odaklandığını görmek için yükleyin.")
+        with gr.TabItem("Classification + GradCAM"):
+            gr.Markdown("Upload a cell image to classify it and see where the model focuses.")
             with gr.Row():
                 with gr.Column(scale=1):
-                    cls_input = gr.Image(label="Girdi Hücre Görüntüsü", type="numpy")
-                    cls_btn = gr.Button("Sınıflandır + GradCAM", variant="primary")
+                    cls_input = gr.Image(label="Input Cell Image", type="numpy")
+                    cls_btn = gr.Button("Classify + GradCAM", variant="primary")
                 with gr.Column(scale=1):
-                    gradcam_output = gr.Image(label="GradCAM Isı Haritası")
-                    cls_result = gr.Textbox(label="Sınıflandırma Sonucu", lines=6)
+                    gradcam_output = gr.Image(label="GradCAM Heatmap")
+                    cls_result = gr.Textbox(label="Classification Result", lines=6)
             
             cls_btn.click(
                 classify_cell,
@@ -249,15 +248,15 @@ with gr.Blocks(title="Hücre Yaşlandırma ve Gençleştirme - Yapay Zeka Demosu
             )
         
         # Tab 3: Random Generation
-        with gr.TabItem("Rastgele Üretim (Sıfırdan Üretim)"):
-            gr.Markdown("Sıfırdan rastgele hücre görüntüleri üretin.")
+        with gr.TabItem("Random Generation (From Scratch)"):
+            gr.Markdown("Generate random cell images from scratch.")
             with gr.Row():
                 with gr.Column(scale=1):
-                    gen_type = gr.Radio(["Genç", "Yaşlı"], label="Hücre Tipi", value="Genç")
-                    gen_steps = gr.Slider(20, 100, value=50, step=10, label="Adım Sayısı")
-                    gen_btn = gr.Button("4 Hücre Üret!", variant="primary")
+                    gen_type = gr.Radio(["Young", "Senescent"], label="Cell Type", value="Young")
+                    gen_steps = gr.Slider(20, 100, value=50, step=10, label="Number of Steps")
+                    gen_btn = gr.Button("Generate 4 Cells!", variant="primary")
                 with gr.Column(scale=1):
-                    gen_output = gr.Image(label="Üretilen Hücreler (2x2 Izgara)")
+                    gen_output = gr.Image(label="Generated Cells (2x2 Grid)")
             
             gen_btn.click(
                 random_generate,
@@ -272,5 +271,5 @@ with gr.Blocks(title="Hücre Yaşlandırma ve Gençleştirme - Yapay Zeka Demosu
 
 
 if __name__ == "__main__":
-    print("\nStarting demo server...", flush=True)
+    print(r"\\nStarting demo server...", flush=True)
     demo.launch(server_name="127.0.0.1", server_port=7860, share=True)

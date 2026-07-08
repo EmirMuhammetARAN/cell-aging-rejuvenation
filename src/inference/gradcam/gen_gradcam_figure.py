@@ -20,7 +20,7 @@ except:
     font = ImageFont.load_default()
 
 # Headers
-for i, (label, color) in enumerate([("Genç Hücreler", (52, 168, 83)), ("Yaşlı Hücreler", (234, 67, 53))]):
+for i, (label, color) in enumerate([("Young Cells", (52, 168, 83)), ("Senescent Cells", (234, 67, 53))]):
     x = i * (w + gap)
     draw.rectangle([x, 0, x + w, header], fill=color)
     bbox = draw.textbbox((0, 0), label, font=font)
@@ -30,6 +30,7 @@ for i, (label, color) in enumerate([("Genç Hücreler", (52, 168, 83)), ("Yaşl�
 canvas.paste(young, (0, header))
 canvas.paste(senes, (w + gap, header))
 
-out = os.path.join(root, 'results', 'thesis_figures', 'figure4_gradcam.png')
+out = os.path.join(root, 'results', 'thesis_figures', 'preprint_figure4_gradcam.png')
+os.makedirs(os.path.dirname(out), exist_ok=True)
 canvas.save(out, quality=95)
 print(f"Saved: {out}")

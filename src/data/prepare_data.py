@@ -31,4 +31,4 @@ for subset in SUBSETS:
     else:
         print(f"Warning: {json_path} not found. Skipping {subset} subset.")
 
-print("\n✓ Tüm subset'ler işlendi!")
+print("\n[OK] Tüm subset'ler işlendi!")

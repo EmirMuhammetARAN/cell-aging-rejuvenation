@@ -23,8 +23,8 @@ torch.set_float32_matmul_precision('medium')
 
 if __name__ == "__main__":
     # ===== CONFIG =====
-    YOUNG_PATH = os.path.join(root_dir, 'data', 'processed_v2', 'train', 'young')
-    SENESCENT_PATH = os.path.join(root_dir, 'data', 'processed_v2', 'train', 'senescent')
+    YOUNG_PATH = os.path.join(root_dir, 'data', 'processed_v4', 'train', 'young')
+    SENESCENT_PATH = os.path.join(root_dir, 'data', 'processed_v4', 'train', 'senescent')
     BATCH_SIZE = 1
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
     NUM_EPOCHS = 200
@@ -34,7 +34,7 @@ if __name__ == "__main__":
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
     START_EPOCH = 0
-    RESUME_EPOCH = 0
+    RESUME_EPOCH = 110
     RESUME_PATH = os.path.join(CHECKPOINT_DIR, f'cyclegan_v2_epoch_{RESUME_EPOCH}.pth') if RESUME_EPOCH > 0 else None
 
     # ===== DATA =====
@@ -66,8 +66,14 @@ if __name__ == "__main__":
     best_loss_G = float('inf')
 
     if RESUME_PATH and os.path.isfile(RESUME_PATH):
-        model.load_state_dict(torch.load(RESUME_PATH, map_location=DEVICE))
-        print(f'Checkpoint loaded from epoch {RESUME_EPOCH}.')
+        checkpoint = torch.load(RESUME_PATH, map_location=DEVICE)
+        if isinstance(checkpoint, dict) and 'model_state' in checkpoint:
+            model.load_state_dict(checkpoint['model_state'])
+            best_loss_G = checkpoint.get('best_loss_G', float('inf'))
+            print(f"Checkpoint loaded from epoch {RESUME_EPOCH}. Restored best G loss: {best_loss_G:.4f}")
+        else:
+            model.load_state_dict(checkpoint)
+            print(f"Checkpoint loaded from epoch {RESUME_EPOCH}. (Old format, best loss reset)")
         START_EPOCH = RESUME_EPOCH
     else:
         print('Starting from scratch.')
@@ -125,19 +131,29 @@ if __name__ == "__main__":
         # Save best
         if avg_G < best_loss_G:
             best_loss_G = avg_G
-            torch.save(model._orig_mod.state_dict(), os.path.join(CHECKPOINT_DIR, 'cyclegan_best_v2.pth'))
+            state = {
+                'epoch': epoch + 1,
+                'model_state': model._orig_mod.state_dict(),
+                'best_loss_G': best_loss_G
+            }
+            torch.save(state, os.path.join(CHECKPOINT_DIR, 'cyclegan_best_v2_resumed.pth'))
             print(f'  -> New best model! G loss: {best_loss_G:.4f}')
 
         # Periodic checkpoint
         if (epoch + 1) % 10 == 0:
-            torch.save(model._orig_mod.state_dict(), os.path.join(CHECKPOINT_DIR, f'cyclegan_v2_epoch_{epoch+1}.pth'))
+            state = {
+                'epoch': epoch + 1,
+                'model_state': model._orig_mod.state_dict(),
+                'best_loss_G': best_loss_G
+            }
+            torch.save(state, os.path.join(CHECKPOINT_DIR, f'cyclegan_v2_epoch_{epoch+1}.pth'))
             print(f'  -> Checkpoint saved for epoch {epoch+1}')
 
         # Sample every 10 epochs
         if (epoch + 1) % 10 == 0:
             model.eval()
-            test_young_dir = os.path.join(root_dir, 'data', 'processed_v2', 'test', 'young')
-            test_senes_dir = os.path.join(root_dir, 'data', 'processed_v2', 'test', 'senescent')
+            test_young_dir = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'young')
+            test_senes_dir = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'senescent')
 
             # Young -> Senescent
             test_img = Image.open(os.path.join(test_young_dir, os.listdir(test_young_dir)[0])).convert('RGB')

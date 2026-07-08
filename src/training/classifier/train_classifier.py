@@ -20,8 +20,8 @@ torch.set_float32_matmul_precision('medium')
 
 if __name__ == "__main__":
     PARENT_DIR = root_dir
-    TRAIN_PATH = os.path.join(PARENT_DIR, 'data/processed_v2/train')
-    VAL_PATH = os.path.join(PARENT_DIR, 'data/processed_v2/test')
+    TRAIN_PATH = os.path.join(PARENT_DIR, 'data/processed_v4/train')
+    VAL_PATH = os.path.join(PARENT_DIR, 'data/processed_v4/test')
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
     NUM_EPOCHS = 20
     BATCH_SIZE = 32
@@ -77,7 +77,7 @@ if __name__ == "__main__":
                 temp_total += labels.size(0)
                 temp_correct += (predicted == labels).sum().item()
         best_accuracy = temp_correct / temp_total if temp_total > 0 else 0.0
-        print(f"Starting Cila with Baseline Accuracy: {best_accuracy:.4f}")
+        print(f"Starting FRESH Training with Baseline Accuracy: {best_accuracy:.4f}")
     except Exception as e:
         print(f"Baseline check failed, starting from 0.0: {e}")
         best_accuracy = 0.0

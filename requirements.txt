@@ -5,7 +5,7 @@ diffusers
 transformers
 accelerate
 peft
-xformers
+
 lpips
 pytorch-fid
 numpy

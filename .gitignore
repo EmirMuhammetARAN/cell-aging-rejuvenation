@@ -10,6 +10,7 @@ build/
 .venv/
 venv/
 env/
+venv_mrcnn/
 
 # IDE
 .vscode/

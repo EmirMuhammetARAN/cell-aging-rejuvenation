@@ -1,4 +1,4 @@
-import os, sys
+import os, sys, re, glob
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 os.environ["TORCH_LOGS"] = "-dynamo,-inductor"
 os.environ["HF_HUB_OFFLINE"] = "0"
@@ -43,7 +43,8 @@ if __name__ == "__main__":
     USE_BFLOAT16 = True
     MAX_GRAD_NORM = 1.0
     VAL_FREQ = 5
-    CHECKPOINT_EPOCHS = (25, 50)
+    MILESTONE_EPOCHS = (25, 50)
+    SAVE_INTERVAL = 5 # Her 5 epochta bir _last.pt guncelle
     LPIPS_WEIGHT = 0.1  # LPIPS AKTIF!
 
     train_transform = transforms.Compose([
@@ -83,32 +84,29 @@ if __name__ == "__main__":
     
     best_val_loss = float('inf')
     start_epoch = 0
-
-    # v4 base checkpoint'ten basla
-    import glob
-    import re
     
-    # Oncelik: LPIPS checkpoint varsa ondan devam et, yoksa base v4'ten yukle
-    lpips_checkpoint_pattern = os.path.join(CHECKPOINT_DIR, f'checkpoint_{EXPERIMENT_NAME}_epoch_*.pt')
-    lpips_checkpoint_files = glob.glob(lpips_checkpoint_pattern)
-    
-    latest_lpips_checkpoint = None
-    max_epoch = -1
-    
-    for file in lpips_checkpoint_files:
-        match = re.search(r'epoch_(\d+)\.pt', file)
-        if match:
-            epoch_num = int(match.group(1))
-            if epoch_num > max_epoch:
-                max_epoch = epoch_num
-                latest_lpips_checkpoint = file
-
-    lpips_best_model_path = os.path.join(CHECKPOINT_DIR, f'best_model_{EXPERIMENT_NAME}.pt')
+    # Oncelik: _last.pt varsa ondan devam et, yoksa base v4'ten yukle
+    last_ckpt_path = os.path.join(CHECKPOINT_DIR, f'checkpoint_{EXPERIMENT_NAME}_last.pt')
     base_checkpoint_path = os.path.join(CHECKPOINT_DIR, BASE_CHECKPOINT)
     
-    if latest_lpips_checkpoint:
+    resume_path = None
+    if os.path.exists(last_ckpt_path):
+        resume_path = last_ckpt_path
+    else:
+        # Eger last yoksa belki bir milestone vardir
+        lpips_checkpoint_pattern = os.path.join(CHECKPOINT_DIR, f'checkpoint_{EXPERIMENT_NAME}_epoch_*.pt')
+        lpips_checkpoint_files = glob.glob(lpips_checkpoint_pattern)
+        max_epoch = -1
+        for file in lpips_checkpoint_files:
+            match = re.search(r'epoch_(\d+)\.pt', file)
+            if match:
+                epoch_num = int(match.group(1))
+                if epoch_num > max_epoch:
+                    max_epoch = epoch_num
+                    resume_path = file
+
+    if resume_path:
         # LPIPS eğitimi devam ediyor
-        resume_path = latest_lpips_checkpoint
         print(f"Resuming LPIPS fine-tune from: {resume_path}")
         checkpoint = torch.load(resume_path, map_location='cpu')
         model.unet.load_state_dict(checkpoint['unet_state_dict'], strict=True)
@@ -158,11 +156,11 @@ if __name__ == "__main__":
 
         pbar = tqdm(train_dataloader, desc=f"Epoch {epoch+1}/{NUM_EPOCHS} [Train LPIPS]")
         for images, labels in pbar:
-            images = images.to(DEVICE, non_blocking=True, memory_format=torch.channels_last)
-            labels = labels.to(DEVICE, non_blocking=True)
-
-            with torch.amp.autocast('cuda', dtype=torch.bfloat16, enabled=USE_BFLOAT16):
-                loss = model(images, labels=labels)
+            images = images.to(DEVICE, memory_format=torch.channels_last)
+            labels = labels.to(DEVICE)
+            
+            with torch.autocast(device_type='cuda', dtype=torch.bfloat16 if USE_BFLOAT16 else torch.float32):
+                loss = model(images, labels)
                 loss = loss / GRADIENT_ACCUMULATION_STEPS
 
             loss.backward()
@@ -171,34 +169,32 @@ if __name__ == "__main__":
             if accumulation_counter % GRADIENT_ACCUMULATION_STEPS == 0:
                 torch.nn.utils.clip_grad_norm_(model.unet.parameters(), MAX_GRAD_NORM)
                 optimizer.step()
+                lr_scheduler.step()
+                model.update_ema()
                 optimizer.zero_grad()
-                model.update_ema()  
 
             train_loss_sum += loss.item() * GRADIENT_ACCUMULATION_STEPS
             train_steps += 1
-            pbar.set_postfix(loss=f"{train_loss_sum/train_steps:.4f}")
+            pbar.set_postfix({
+                "loss": f"{loss.item() * GRADIENT_ACCUMULATION_STEPS:.4f}",
+                "lr": f"{optimizer.param_groups[0]['lr']:.2e}"
+            })
 
-        if accumulation_counter % GRADIENT_ACCUMULATION_STEPS != 0:
-            torch.nn.utils.clip_grad_norm_(model.unet.parameters(), MAX_GRAD_NORM)
-            optimizer.step()
-            optimizer.zero_grad()
-            model.update_ema()
-
-        lr_scheduler.step()
         avg_train_loss = train_loss_sum / train_steps
-
+        
         if (epoch + 1) % VAL_FREQ == 0:
             model.unet.eval()
             val_loss_sum = 0.0
             val_steps = 0
+            
             with torch.no_grad():
-                for images, labels in tqdm(val_dataloader, desc=f"Epoch {epoch+1}/{NUM_EPOCHS} [Val]"):
-                    images = images.to(DEVICE, non_blocking=True, memory_format=torch.channels_last)
-                    labels = labels.to(DEVICE, non_blocking=True)
-                    with torch.amp.autocast('cuda', dtype=torch.bfloat16, enabled=USE_BFLOAT16):
-                        loss = model(images, labels=labels)
-                    val_loss_sum += loss.item()
-                    val_steps += 1
+                for val_images, val_labels in val_dataloader:
+                    val_images = val_images.to(DEVICE, memory_format=torch.channels_last)
+                    val_labels = val_labels.to(DEVICE)
+                    with torch.autocast(device_type='cuda', dtype=torch.bfloat16 if USE_BFLOAT16 else torch.float32):
+                        loss = model(val_images, val_labels)
+                        val_loss_sum += loss.item()
+                        val_steps += 1
 
             avg_val_loss = val_loss_sum / val_steps
             print(f"Epoch {epoch+1} | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
@@ -270,7 +266,18 @@ if __name__ == "__main__":
         else:
             print(f"Epoch {epoch+1} | Train Loss: {avg_train_loss:.4f}")
 
-        if (epoch + 1) in CHECKPOINT_EPOCHS:
+        # ----- CHECKPOINT YONETIMI -----
+        if (epoch + 1) % SAVE_INTERVAL == 0:
+            last_path = os.path.join(CHECKPOINT_DIR, f'checkpoint_{EXPERIMENT_NAME}_last.pt')
+            torch.save({
+                'epoch': epoch + 1,
+                'unet_state_dict': model.unet.state_dict(),
+                'ema_unet_state_dict': model.ema_unet.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'lr_scheduler_state_dict': lr_scheduler.state_dict(),
+            }, last_path)
+            
+        if (epoch + 1) in MILESTONE_EPOCHS:
             ckpt_path = os.path.join(CHECKPOINT_DIR, f'checkpoint_{EXPERIMENT_NAME}_epoch_{epoch+1}.pt')
             torch.save({
                 'epoch': epoch + 1,
@@ -279,6 +286,6 @@ if __name__ == "__main__":
                 'optimizer_state_dict': optimizer.state_dict(),
                 'lr_scheduler_state_dict': lr_scheduler.state_dict(),
             }, ckpt_path)
-            print(f"  ✓ Checkpoint kaydedildi: epoch_{epoch+1}.pt")
+            print(f"  ✓ Milestone Checkpoint kaydedildi: epoch_{epoch+1}.pt")
 
     print("LPIPS Fine-tune tamamlandı!")
