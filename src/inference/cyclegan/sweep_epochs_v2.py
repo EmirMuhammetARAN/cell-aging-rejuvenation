@@ -17,8 +17,8 @@ from models.classifier.classifier import Classifier
 torch.backends.cudnn.benchmark = True
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-TEST_YOUNG = os.path.join(root_dir, 'data', 'processed_v2', 'test', 'young')
-TEST_SENES = os.path.join(root_dir, 'data', 'processed_v2', 'test', 'senescent')
+TEST_YOUNG = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'young')
+TEST_SENES = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'senescent')
 CHECKPOINT_DIR = os.path.join(root_dir, 'checkpoints')
 OUTPUT_BASE = os.path.join(root_dir, 'results', 'generated', 'cyclegan_v2_sweep')
 
@@ -60,7 +60,13 @@ for epoch in epochs:
 
     # Load model
     model = CycleGANModel(GeneratorResNet, Discriminator, DEVICE, use_lpips=False)
-    model.load_state_dict(torch.load(ckpt_path, map_location=DEVICE))
+    
+    checkpoint = torch.load(ckpt_path, map_location=DEVICE)
+    if isinstance(checkpoint, dict) and 'model_state' in checkpoint:
+        model.load_state_dict(checkpoint['model_state'])
+    else:
+        model.load_state_dict(checkpoint)
+        
     model.to(DEVICE, memory_format=torch.channels_last)
     model.eval()
 

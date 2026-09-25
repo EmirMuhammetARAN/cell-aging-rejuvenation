@@ -34,7 +34,7 @@ if __name__ == "__main__":
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
     START_EPOCH = 0
-    RESUME_EPOCH = 110
+    RESUME_EPOCH = 160
     RESUME_PATH = os.path.join(CHECKPOINT_DIR, f'cyclegan_v2_epoch_{RESUME_EPOCH}.pth') if RESUME_EPOCH > 0 else None
 
     # ===== DATA =====

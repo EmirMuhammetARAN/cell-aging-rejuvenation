@@ -11,10 +11,10 @@ root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.pa
 # Paths
 TEST_YOUNG = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'young')
 TEST_SENES = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'senescent')
-CYCLEGAN_AGING = os.path.join(root_dir, 'results', 'generated', 'cyclegan_v2_sweep', 'epoch_110', 'aging')
-CYCLEGAN_REJU = os.path.join(root_dir, 'results', 'generated', 'cyclegan_v2_sweep', 'epoch_110', 'rejuvenation')
-LDM_AGING = os.path.join(root_dir, 'results', 'generated', 'ldm', 'sweep_as0.75_ac4.0_rs0.65_rc3.5', 'aging')
-LDM_REJU = os.path.join(root_dir, 'results', 'generated', 'ldm', 'sweep_as0.75_ac4.0_rs0.65_rc3.5', 'rejuvenation')
+CYCLEGAN_AGING = os.path.join(root_dir, 'results', 'generated', 'cyclegan_v2_sweep', 'epoch_160', 'aging')
+CYCLEGAN_REJU = os.path.join(root_dir, 'results', 'generated', 'cyclegan_v2_sweep', 'epoch_160', 'rejuvenation')
+LDM_AGING = os.path.join(root_dir, 'results', 'generated', 'seed_sweep', 'seed_2026', 'aging')
+LDM_REJU = os.path.join(root_dir, 'results', 'generated', 'seed_sweep', 'seed_2026', 'rejuv')
 OUTPUT_DIR = os.path.join(root_dir, 'results', 'thesis_figures')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -63,9 +63,9 @@ def create_figure(task, input_dir, cyclegan_dir, ldm_dir, title, output_name):
     draw.text(((width - tw) // 2, 8), title, fill='black', font=title_font)
     
     labels = [
-        (f"Girdi ({task})", 'input'),
-        ("CycleGAN v2", 'cyclegan'),
-        ("LDM v4", 'ldm'),
+        (f"Input ({task})", 'input'),
+        ("CycleGAN Epoch 160", 'cyclegan'),
+        ("LDM v12", 'ldm'),
     ]
     
     for row_idx, img_name in enumerate(samples):
@@ -98,17 +98,17 @@ if __name__ == "__main__":
     print("Creating thesis figures (CycleGAN v2 vs LDM v4 FID-optimized)...\n")
     
     # Figure 1: Aging (Young -> Senescent)
-    input_label = "Genç"
+    input_label = "Young"
     create_figure(
         input_label, TEST_YOUNG, CYCLEGAN_AGING, LDM_AGING,
-        "YAŞLANMA (Genç -> Yaşlı)", "figure1_aging_v2.png"
+        "AGING (Young -> Senescent)", "figure1_aging_v2.png"
     )
     
     # Figure 2: Rejuvenation (Senescent -> Young)
-    input_label = "Yaşlı"
+    input_label = "Senescent"
     create_figure(
         input_label, TEST_SENES, CYCLEGAN_REJU, LDM_REJU,
-        "GENÇLEŞTİRME (Yaşlı -> Genç)", "figure2_rejuvenation_v2.png"
+        "REJUVENATION (Senescent -> Young)", "figure2_rejuvenation_v2.png"
     )
     
     print("\nDone!")
