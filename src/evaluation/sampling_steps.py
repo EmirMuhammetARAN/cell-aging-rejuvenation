@@ -38,27 +38,25 @@ results_dir = os.path.join(base_dir, "results", "morphological_validation")
 artifact_dir = r"C:\Users\emir_\.gemini\antigravity-ide\brain\5ba6371e-e7f8-4738-bb94-e1efd97424b7"
 os.makedirs(results_dir, exist_ok=True)
 
-# 1. Load LDM
-print("[*] Loading LDM v12 model...")
-ldm = CellLDM(num_classes=2, lpips_weight=0.0)
-ldm.scaling_factor = 0.18215
+# 1. Load LDM (Identical Architecture to seed_sweep.py)
+print("[*] Loading LDM v12 model (aligned with seed_sweep.py)...")
+ldm = CellLDM(num_classes=2)
 ldm.to(DEVICE, memory_format=torch.channels_last)
 ldm.vae.to(memory_format=torch.channels_last)
-ldm.init_ema()
 
 ckpt = torch.load(CHECKPOINT, map_location='cpu')
-for key in ['unet_state_dict', 'ema_unet_state_dict']:
-    if key in ckpt and 'class_embedding.weight' in ckpt[key]:
-        weight = ckpt[key]['class_embedding.weight']
-        if weight.shape[0] == 2:
-            pad_weight = torch.zeros(1, weight.shape[1], device=weight.device)
-            ckpt[key]['class_embedding.weight'] = torch.cat([weight, pad_weight], dim=0)
-
 ldm.unet.load_state_dict(ckpt['unet_state_dict'])
+ldm.init_ema()
 if 'ema_unet_state_dict' in ckpt:
     ldm.ema_unet.load_state_dict(ckpt['ema_unet_state_dict'])
 ldm.eval()
 del ckpt; gc.collect()
+
+def set_seed(seed=2026):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
 
 # 2. Load Classifier
 print("[*] Loading ResNet-18 Classifier...")
@@ -121,6 +119,7 @@ for task, in_sub, fname, ldm_label, cls_target, target_name, strength, cfg in ex
     
     print(f"\n[*] Processing Exemplar: {task} - {fname}")
     for s in step_counts:
+        set_seed(2026)
         t0 = time.time()
         with torch.no_grad():
             out_tensor = ldm.translate(
@@ -129,13 +128,14 @@ for task, in_sub, fname, ldm_label, cls_target, target_name, strength, cfg in ex
             )
         dt = time.time() - t0
         
-        # Convert to numpy uint8
-        out_denorm = torch.clamp((out_tensor.cpu()[0] * 0.5 + 0.5) * 255.0, 0, 255).permute(1, 2, 0).numpy().astype(np.uint8)
-        pil_out = Image.fromarray(out_denorm)
-        
-        # Save image file
+        # Save image file using torchvision (out_tensor is already in [0, 1] from CellLDM)
         save_fname = f"{task}_{fname[:-4]}_step{s}.png"
-        pil_out.save(os.path.join(steps_img_dir, save_fname))
+        save_path = os.path.join(steps_img_dir, save_fname)
+        save_image(out_tensor.cpu(), save_path)
+        
+        # Convert cleanly to numpy uint8 matching seed_sweep.py
+        out_denorm = (out_tensor.cpu()[0].clamp(0.0, 1.0) * 255.0).permute(1, 2, 0).numpy().astype(np.uint8)
+        pil_out = Image.fromarray(out_denorm)
         
         # Classifier evaluation
         cls_t = cls_transform(pil_out).unsqueeze(0).to(DEVICE)
@@ -187,12 +187,13 @@ for task, in_sub, cell_list, ldm_label, cls_target, strength, cfg in cohort_task
         np_in = np.array(pil_in)
         
         for s in step_counts:
+            set_seed(2026)
             with torch.no_grad():
                 out_tensor = ldm.translate(
                     tensor_in, target_labels=torch.tensor([ldm_label], device=DEVICE),
                     strength=strength, num_steps=s, use_ema=True, guidance_scale=cfg
                 )
-            out_np = torch.clamp((out_tensor.cpu()[0] * 0.5 + 0.5) * 255.0, 0, 255).permute(1, 2, 0).numpy().astype(np.uint8)
+            out_np = (out_tensor.cpu()[0].clamp(0.0, 1.0) * 255.0).permute(1, 2, 0).numpy().astype(np.uint8)
             pil_out = Image.fromarray(out_np)
             
             cls_t = cls_transform(pil_out).unsqueeze(0).to(DEVICE)
