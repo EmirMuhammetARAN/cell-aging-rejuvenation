@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 Generate 6 Publication-Grade Panels for the 3 Biological Validation Shields
 ---------------------------------------------------------------------------
