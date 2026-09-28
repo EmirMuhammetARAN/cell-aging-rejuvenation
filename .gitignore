@@ -1,47 +1,133 @@
-# Python
+﻿# ==============================================================================
+# Security & Secret Credentials (ZERO-LEAK POLICY)
+# ==============================================================================
+.env
+.env.*
+*.env
+*.secret
+*.secrets
+secrets/
+credentials/
+credentials.json
+client_secrets.json
+token.json
+tokens.json
+*.token
+*.jwt
+api_key*
+apikey*
+
+# Private Keys & Certificates
+*.pem
+*.key
+*.cert
+*.crt
+*.pfx
+*.p12
+id_rsa*
+id_ed25519*
+
+# MLOps, Cloud & Framework Auth
+.gradio/
+wandb/
+.wandb
+wandb.key
+.netrc
+.npmrc
+.aws/
+.gcp/
+.azure/
+
+# ==============================================================================
+# Python & Virtual Environments
+# ==============================================================================
 __pycache__/
 *.py[cod]
+*$py.class
 *.egg-info/
 dist/
 build/
 .eggs/
 
-# Virtual Environment
 .venv/
 venv/
 env/
+ENV/
 venv_mrcnn/
 
-# IDE
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.cache
+
+# ==============================================================================
+# IDE & System Files
+# ==============================================================================
 .vscode/
 .idea/
 *.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
 
 # Jupyter
 .ipynb_checkpoints/
 
-# Data
+# ==============================================================================
+# Large Data & Binary Files (Prevent Git Bloat & 100MB Push Failures)
+# ==============================================================================
+# Raw / Processed Data
 data/raw/
 data/processed/
-*.jpg
-*.png
+data/
+
+# Tensors, Weights, Model Checkpoints
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
+*.onnx
+*.h5
+*.hdf5
+checkpoints/
+outputs/
+results/
+
+# Arrays, Serialized Data & Dataframes
+*.npy
+*.npz
+*.pkl
+*.pickle
+*.parquet
+*.feather
+
+# Archives
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+*.rar
+
+# Raw Microscopy & Image Outputs
 *.tif
 *.tiff
+*.png
+*.jpg
+*.jpeg
 
-# Model checkpoints
-outputs/checkpoints/*.pt
-outputs/checkpoints/*.pth
-outputs/samples/
+# Logs & Temporary Files
+*.log
+logs/
+*.tmp
+*.temp
 
-# Environment
-.env
-
-# OS
-.DS_Store
-Thumbs.db
-checkpoints/
-results/
-a.txt
-fatma hoca/
-Yeni Metin Belgesi.txt
+# Local scratch / test scraps
 deneme/
+fatma hoca/
+a.txt
+Yeni Metin Belgesi.txt
