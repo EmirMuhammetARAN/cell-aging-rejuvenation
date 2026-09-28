@@ -64,14 +64,15 @@ def extract_masks_for_dataset(model, img_dir, save_path):
     print(f"    Found {N} test images.")
     
     if os.path.exists(save_path):
-        masks_arr = np.load(save_path)
-        print(f"    [RESUME] Loaded existing array with shape {masks_arr.shape}")
+        loaded = np.load(save_path, allow_pickle=True)
+        masks_dict = loaded.item() if (hasattr(loaded, 'shape') and loaded.ndim == 0) else dict(loaded)
+        print(f"    [RESUME] Loaded existing dictionary with {len(masks_dict)} masks")
     else:
-        masks_arr = np.zeros((N, 512, 512), dtype=bool)
+        masks_dict = {}
         
     start_time = time.time()
     for idx, fname in enumerate(files):
-        if np.any(masks_arr[idx]):
+        if fname in masks_dict:
             continue
             
         p_img = os.path.join(img_dir, fname)
@@ -81,17 +82,19 @@ def extract_masks_for_dataset(model, img_dir, save_path):
         
         if masks.shape[-1] > 0:
             combined = np.sum(masks, axis=-1) > 0
-            masks_arr[idx] = combined
+            masks_dict[fname] = combined
+        else:
+            masks_dict[fname] = np.zeros(img_np.shape[:2], dtype=bool)
             
         if (idx + 1) % 50 == 0 or (idx + 1) == N:
             elapsed = time.time() - start_time
             rate = (idx + 1) / max(1, elapsed)
             print(f"    [{idx+1}/{N}] Processed ({rate:.2f} img/s)...")
-            np.save(save_path, masks_arr)
+            np.save(save_path, masks_dict)
             
-    np.save(save_path, masks_arr)
-    print(f"[OK] Saved {N} masks to {save_path}")
-    return masks_arr
+    np.save(save_path, masks_dict)
+    print(f"[OK] Saved {len(masks_dict)} masks to {save_path}")
+    return masks_dict
 
 
 def main():
@@ -110,15 +113,16 @@ def main():
     model = modellib.MaskRCNN(mode="inference", config=config, model_dir=os.path.dirname(weights_path))
     model.load_weights(weights_path, by_name=True)
     
+    # Official evaluated datasets: LDM Seed 2026 (Best FID) & CycleGAN Epoch 160
     if args.target in ['ldm', 'all']:
-        aging_dir = os.path.join(base_dir, "results", "ldm", "v12_v4_data_lpips_last", "aging")
-        reju_dir = os.path.join(base_dir, "results", "ldm", "v12_v4_data_lpips_last", "rejuvenation")
+        aging_dir = os.path.join(base_dir, "results", "generated", "seed_sweep", "seed_2026", "aging")
+        reju_dir = os.path.join(base_dir, "results", "generated", "seed_sweep", "seed_2026", "rejuv")
         extract_masks_for_dataset(model, aging_dir, os.path.join(scratch_dir, "mrcnn_masks_aging.npy"))
         extract_masks_for_dataset(model, reju_dir, os.path.join(scratch_dir, "mrcnn_masks_reju.npy"))
         
     if args.target in ['cyclegan', 'all']:
-        cg_aging_dir = os.path.join(base_dir, "results", "cyclegan", "epoch_160", "aging")
-        cg_reju_dir = os.path.join(base_dir, "results", "cyclegan", "epoch_160", "rejuvenation")
+        cg_aging_dir = os.path.join(base_dir, "results", "generated", "cyclegan_v2_sweep", "epoch_160", "aging")
+        cg_reju_dir = os.path.join(base_dir, "results", "generated", "cyclegan_v2_sweep", "epoch_160", "rejuvenation")
         extract_masks_for_dataset(model, cg_aging_dir, os.path.join(scratch_dir, "mrcnn_masks_cyclegan_aging.npy"))
         extract_masks_for_dataset(model, cg_reju_dir, os.path.join(scratch_dir, "mrcnn_masks_cyclegan_reju.npy"))
         

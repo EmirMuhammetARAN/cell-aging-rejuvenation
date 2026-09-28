@@ -105,8 +105,10 @@ def run_full_population_evaluation(base_dir, results_dir, artifact_dir):
     
     if os.path.exists(mask_aging_path) and os.path.exists(mask_reju_path):
         print(f"[*] Loading precomputed Ground-Truth Mask R-CNN segmentations...")
-        mrcnn_masks_aging = np.load(mask_aging_path)
-        mrcnn_masks_reju = np.load(mask_reju_path)
+        l_ag = np.load(mask_aging_path, allow_pickle=True)
+        mrcnn_masks_aging = l_ag.item() if (hasattr(l_ag, 'shape') and l_ag.ndim == 0) else l_ag
+        l_re = np.load(mask_reju_path, allow_pickle=True)
+        mrcnn_masks_reju = l_re.item() if (hasattr(l_re, 'shape') and l_re.ndim == 0) else l_re
     else:
         print("[!] Precomputed masks not found in scratch/. Please run mrcnn_mask_extractor.py first.")
         return
@@ -115,13 +117,13 @@ def run_full_population_evaluation(base_dir, results_dir, artifact_dir):
         {
             'task': 'aging',
             'input_dir': os.path.join(base_dir, 'data/processed_v4/test/young'),
-            'ldm_dir': os.path.join(base_dir, 'results/ldm/v12_v4_data_lpips_last/aging'),
+            'ldm_dir': os.path.join(base_dir, 'results/generated/seed_sweep/seed_2026/aging'),
             'masks': mrcnn_masks_aging
         },
         {
             'task': 'rejuvenation',
             'input_dir': os.path.join(base_dir, 'data/processed_v4/test/senescent'),
-            'ldm_dir': os.path.join(base_dir, 'results/ldm/v12_v4_data_lpips_last/rejuvenation'),
+            'ldm_dir': os.path.join(base_dir, 'results/generated/seed_sweep/seed_2026/rejuv'),
             'masks': mrcnn_masks_reju
         }
     ]
@@ -140,7 +142,7 @@ def run_full_population_evaluation(base_dir, results_dir, artifact_dir):
             
             img_in = skimage.io.imread(p_in)
             img_ldm = skimage.io.imread(p_ldm)
-            gt_mask = masks_arr[idx] > 0
+            gt_mask = (masks_arr.get(fname, np.zeros((512, 512), dtype=bool)) > 0) if isinstance(masks_arr, dict) else (masks_arr[idx] > 0)
             
             tex_in = extract_cytoplasmic_texture(img_in, gt_mask, apply_erosion=True, erosion_kernel_size=7)
             tex_ldm = extract_cytoplasmic_texture(img_ldm, gt_mask, apply_erosion=True, erosion_kernel_size=7)

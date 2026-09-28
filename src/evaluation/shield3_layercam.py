@@ -215,17 +215,21 @@ def run_full_population_evaluation(target='ldm', base_dir=root_dir, results_dir=
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     
+    def _load_masks(npy_path):
+        raw = np.load(npy_path, allow_pickle=True)
+        return raw.item() if (hasattr(raw, 'shape') and raw.ndim == 0) else raw
+
     if target == 'ldm':
-        aging_dir = os.path.join(base_dir, 'results/ldm/v12_v4_data_lpips_last/aging')
-        reju_dir = os.path.join(base_dir, 'results/ldm/v12_v4_data_lpips_last/rejuvenation')
-        mask_aging = np.load(os.path.join(scratch_dir, 'mrcnn_masks_aging.npy'))
-        mask_reju = np.load(os.path.join(scratch_dir, 'mrcnn_masks_reju.npy'))
+        aging_dir = os.path.join(base_dir, 'results/generated/seed_sweep/seed_2026/aging')
+        reju_dir = os.path.join(base_dir, 'results/generated/seed_sweep/seed_2026/rejuv')
+        mask_aging = _load_masks(os.path.join(scratch_dir, 'mrcnn_masks_aging.npy'))
+        mask_reju = _load_masks(os.path.join(scratch_dir, 'mrcnn_masks_reju.npy'))
         csv_name = 'full_test_layercam_alignment.csv'
     else:
-        aging_dir = os.path.join(base_dir, 'results/cyclegan/epoch_160/aging')
-        reju_dir = os.path.join(base_dir, 'results/cyclegan/epoch_160/rejuvenation')
-        mask_aging = np.load(os.path.join(scratch_dir, 'mrcnn_masks_cyclegan_aging.npy'))
-        mask_reju = np.load(os.path.join(scratch_dir, 'mrcnn_masks_cyclegan_reju.npy'))
+        aging_dir = os.path.join(base_dir, 'results/generated/cyclegan_v2_sweep/epoch_160/aging')
+        reju_dir = os.path.join(base_dir, 'results/generated/cyclegan_v2_sweep/epoch_160/rejuvenation')
+        mask_aging = _load_masks(os.path.join(scratch_dir, 'mrcnn_masks_cyclegan_aging.npy'))
+        mask_reju = _load_masks(os.path.join(scratch_dir, 'mrcnn_masks_cyclegan_reju.npy'))
         csv_name = 'full_test_cyclegan_layercam_alignment.csv'
         
     tasks = [
@@ -245,7 +249,7 @@ def run_full_population_evaluation(target='ldm', base_dir=root_dir, results_dir=
             tensor_img = transform(pil_img).unsqueeze(0).to(device)
             
             cam_map, probs = layercam.generate_cam(tensor_img, target_class=target_cls)
-            gt_mask = masks_arr[idx] > 0
+            gt_mask = (masks_arr.get(fname, np.zeros((512, 512), dtype=bool)) > 0) if isinstance(masks_arr, dict) else (masks_arr[idx] > 0)
             
             metrics = compute_alignment_metrics(cam_map, gt_mask)
             pred_cls = int(np.argmax(probs))

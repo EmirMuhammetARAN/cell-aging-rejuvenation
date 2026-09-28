@@ -121,8 +121,8 @@ def render_exemplar_panels(model, base_dir, results_dir, artifact_dir):
             'name': 'aging',
             'title': 'Aging: Young -> Senescent (Expected: Hypertrophic Expansion)',
             'input_dir': os.path.join(base_dir, 'data/processed_v4/test/young'),
-            'cg_dir': os.path.join(base_dir, 'results/cyclegan/epoch_160/aging'),
-            'ldm_dir': os.path.join(base_dir, 'results/ldm/v12_v4_data_lpips_last/aging'),
+            'cg_dir': os.path.join(base_dir, 'results/generated/cyclegan_v2_sweep/epoch_160/aging'),
+            'ldm_dir': os.path.join(base_dir, 'results/generated/seed_sweep/seed_2026/aging'),
             'samples': ['senescent_MSCs_10005_11.jpg', 'senescent_MSCs_10005_13.jpg', 'senescent_MSCs_10005_16.jpg'],
             'out_fig': 'figure_aging_morphological_validation.png'
         },
@@ -130,8 +130,8 @@ def render_exemplar_panels(model, base_dir, results_dir, artifact_dir):
             'name': 'rejuvenation',
             'title': 'Rejuvenation: Senescent -> Young (Expected: Spindle Contraction)',
             'input_dir': os.path.join(base_dir, 'data/processed_v4/test/senescent'),
-            'cg_dir': os.path.join(base_dir, 'results/cyclegan/epoch_160/rejuvenation'),
-            'ldm_dir': os.path.join(base_dir, 'results/ldm/v12_v4_data_lpips_last/rejuvenation'),
+            'cg_dir': os.path.join(base_dir, 'results/generated/cyclegan_v2_sweep/epoch_160/rejuvenation'),
+            'ldm_dir': os.path.join(base_dir, 'results/generated/seed_sweep/seed_2026/rejuv'),
             'samples': ['senescent_MSCs_10005_0.jpg', 'senescent_MSCs_10005_1.jpg', 'senescent_MSCs_10005_10.jpg'],
             'out_fig': 'figure_rejuvenation_morphological_validation.png'
         }
@@ -239,14 +239,14 @@ def run_full_population_evaluation(model, base_dir, results_dir, artifact_dir):
         {
             'task': 'aging',
             'input_dir': os.path.join(base_dir, 'data/processed_v4/test/young'),
-            'cg_dir': os.path.join(base_dir, 'results/cyclegan/epoch_160/aging'),
-            'ldm_dir': os.path.join(base_dir, 'results/ldm/v12_v4_data_lpips_last/aging')
+            'cg_dir': os.path.join(base_dir, 'results/generated/cyclegan_v2_sweep/epoch_160/aging'),
+            'ldm_dir': os.path.join(base_dir, 'results/generated/seed_sweep/seed_2026/aging')
         },
         {
             'task': 'rejuvenation',
             'input_dir': os.path.join(base_dir, 'data/processed_v4/test/senescent'),
-            'cg_dir': os.path.join(base_dir, 'results/cyclegan/epoch_160/rejuvenation'),
-            'ldm_dir': os.path.join(base_dir, 'results/ldm/v12_v4_data_lpips_last/rejuvenation')
+            'cg_dir': os.path.join(base_dir, 'results/generated/cyclegan_v2_sweep/epoch_160/rejuvenation'),
+            'ldm_dir': os.path.join(base_dir, 'results/generated/seed_sweep/seed_2026/rejuv')
         }
     ]
     
