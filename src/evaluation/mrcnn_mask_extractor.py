@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 MASK R-CNN SINGLE-CELL SEGMENTATION EXTRACTOR
 =============================================
@@ -100,7 +100,7 @@ def main():
                         help="Target dataset to extract: ldm, cyclegan, or all")
     args = parser.parse_args()
     
-    base_dir = r"D:\GitHub\cell-aging-rejuvenation"
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     weights_path = os.path.join(base_dir, "fatma hoca", "mask_rcnn_object_0800.h5")
     scratch_dir = os.path.join(base_dir, "scratch")
     os.makedirs(scratch_dir, exist_ok=True)

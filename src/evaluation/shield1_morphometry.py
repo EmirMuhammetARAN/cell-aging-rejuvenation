@@ -225,7 +225,8 @@ def render_exemplar_panels(model, base_dir, results_dir, artifact_dir):
         out_path = os.path.join(results_dir, t['out_fig'])
         plt.savefig(out_path, bbox_inches='tight', dpi=300)
         plt.close()
-        shutil.copy2(out_path, os.path.join(artifact_dir, t['out_fig']))
+        if artifact_dir and os.path.exists(artifact_dir):
+            shutil.copy2(out_path, os.path.join(artifact_dir, t['out_fig']))
         print(f"[OK] Generated: {t['out_fig']}")
 
 
@@ -402,7 +403,8 @@ Model: LDM v12 vs CycleGAN Epoch 160 vs Biological Ground Truth Controls
     out_fig = os.path.join(results_dir, 'figure_population_violin_plots.png')
     plt.savefig(out_fig, bbox_inches='tight', dpi=300)
     plt.close()
-    shutil.copy2(out_fig, os.path.join(artifact_dir, 'figure_population_violin_plots.png'))
+    if artifact_dir and os.path.exists(artifact_dir):
+        shutil.copy2(out_fig, os.path.join(artifact_dir, 'figure_population_violin_plots.png'))
     print(f"[OK] Generated: figure_population_violin_plots.png")
 
 
@@ -412,7 +414,7 @@ def main():
                         help="Execution mode: exemplars, population, or all (default)")
     args = parser.parse_args()
     
-    base_dir = r"D:\GitHub\cell-aging-rejuvenation"
+    base_dir = root_dir
     weights_path = os.path.join(base_dir, 'fatma hoca', 'mask_rcnn_object_0800.h5')
     results_dir = os.path.join(base_dir, 'results', 'morphological_validation')
     artifact_dir = r"C:\Users\emir_\.gemini\antigravity-ide\brain\5ba6371e-e7f8-4738-bb94-e1efd97424b7"

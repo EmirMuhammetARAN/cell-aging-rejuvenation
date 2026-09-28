@@ -263,7 +263,8 @@ def render_panel(base_dir=root_dir, results_dir=None, artifact_dir=None):
     out_panel = os.path.join(results_dir, "figure_seed_invariance_exemplars.png")
     plt.savefig(out_panel, bbox_inches='tight', dpi=300)
     plt.close()
-    shutil.copy2(out_panel, os.path.join(artifact_dir, "figure_seed_invariance_exemplars.png"))
+    if artifact_dir and os.path.exists(artifact_dir):
+        shutil.copy2(out_panel, os.path.join(artifact_dir, "figure_seed_invariance_exemplars.png"))
     print(f"[OK] Generated: figure_seed_invariance_exemplars.png")
 
 

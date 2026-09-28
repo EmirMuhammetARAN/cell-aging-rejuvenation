@@ -24,7 +24,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import shutil
 
-base_dir = r"D:\GitHub\cell-aging-rejuvenation"
+base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, base_dir)
 
 from models.ldm.model_lpips import CellLDM
@@ -306,7 +306,8 @@ out_panel_name = "figure_sampling_steps_pseudo_timelapse.png"
 out_panel_path = os.path.join(results_dir, out_panel_name)
 plt.savefig(out_panel_path, bbox_inches='tight', dpi=300)
 plt.close()
-shutil.copy2(out_panel_path, os.path.join(artifact_dir, out_panel_name))
+if artifact_dir and os.path.exists(artifact_dir):
+    shutil.copy2(out_panel_path, os.path.join(artifact_dir, out_panel_name))
 print(f"[OK] Saved 300 DPI Pseudo-Timelapse Panel: {out_panel_name}")
 
 print("\n" + "=" * 80)
@@ -364,7 +365,8 @@ curve_out_name = "figure_step_convergence_curves.png"
 curve_out_path = os.path.join(results_dir, curve_out_name)
 plt.savefig(curve_out_path, bbox_inches='tight', dpi=300)
 plt.close()
-shutil.copy2(curve_out_path, os.path.join(artifact_dir, curve_out_name))
+if artifact_dir and os.path.exists(artifact_dir):
+    shutil.copy2(curve_out_path, os.path.join(artifact_dir, curve_out_name))
 print(f"[OK] Saved Convergence Curves: {curve_out_name}")
 
 # Statistical Report

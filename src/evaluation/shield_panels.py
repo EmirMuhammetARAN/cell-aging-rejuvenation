@@ -23,8 +23,9 @@ import torch
 import torch.nn.functional as F
 from torchvision import transforms
 
-base_dir = r"D:\GitHub\cell-aging-rejuvenation"
-sys.path.insert(0, base_dir)
+base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if base_dir not in sys.path:
+    sys.path.insert(0, base_dir)
 
 from models.classifier.classifier import Classifier
 from src.evaluation.shield3_layercam import HierarchicalLayerCAM, compute_alignment_metrics, create_composite_overlay
@@ -183,7 +184,8 @@ def generate_shield1_panel(samples, title, out_name, is_best=True):
     out_path = os.path.join(results_dir, out_name)
     plt.savefig(out_path, bbox_inches='tight', dpi=300)
     plt.close()
-    shutil.copy2(out_path, os.path.join(artifact_dir, out_name))
+    if artifact_dir and os.path.exists(artifact_dir):
+        shutil.copy2(out_path, os.path.join(artifact_dir, out_name))
     print(f"[OK] Saved Shield 1 Panel: {out_name}")
 
 
@@ -277,7 +279,8 @@ def generate_shield2_panel(samples, title, out_name, is_best=True):
     out_path = os.path.join(results_dir, out_name)
     plt.savefig(out_path, bbox_inches='tight', dpi=300)
     plt.close()
-    shutil.copy2(out_path, os.path.join(artifact_dir, out_name))
+    if artifact_dir and os.path.exists(artifact_dir):
+        shutil.copy2(out_path, os.path.join(artifact_dir, out_name))
     print(f"[OK] Saved Shield 2 Panel: {out_name}")
 
 
@@ -372,7 +375,8 @@ def generate_shield3_panel(samples, title, out_name, is_best=True):
     out_path = os.path.join(results_dir, out_name)
     plt.savefig(out_path, bbox_inches='tight', dpi=300)
     plt.close()
-    shutil.copy2(out_path, os.path.join(artifact_dir, out_name))
+    if artifact_dir and os.path.exists(artifact_dir):
+        shutil.copy2(out_path, os.path.join(artifact_dir, out_name))
     print(f"[OK] Saved Shield 3 Panel: {out_name}")
 
 

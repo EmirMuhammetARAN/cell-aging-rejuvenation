@@ -259,12 +259,13 @@ Method: 7x7 Elliptical Morphological Erosion on Mask R-CNN Ground-Truth Masks
     out_fig = os.path.join(results_dir, 'figure_full_population_texture_violin.png')
     plt.savefig(out_fig, bbox_inches='tight', dpi=300)
     plt.close()
-    shutil.copy2(out_fig, os.path.join(artifact_dir, 'figure_full_population_texture_violin.png'))
+    if artifact_dir and os.path.exists(artifact_dir):
+        shutil.copy2(out_fig, os.path.join(artifact_dir, 'figure_full_population_texture_violin.png'))
     print(f"[OK] Generated: figure_full_population_texture_violin.png")
 
 
 def main():
-    base_dir = r"D:\GitHub\cell-aging-rejuvenation"
+    base_dir = root_dir
     results_dir = os.path.join(base_dir, 'results', 'morphological_validation')
     artifact_dir = r"C:\Users\emir_\.gemini\antigravity-ide\brain\5ba6371e-e7f8-4738-bb94-e1efd97424b7"
     os.makedirs(results_dir, exist_ok=True)

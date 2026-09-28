@@ -300,7 +300,7 @@ def main():
                         help="Target model to evaluate: ldm, cyclegan, or all")
     args = parser.parse_args()
     
-    base_dir = r"D:\GitHub\cell-aging-rejuvenation"
+    base_dir = root_dir
     results_dir = os.path.join(base_dir, 'results', 'morphological_validation')
     artifact_dir = r"C:\Users\emir_\.gemini\antigravity-ide\brain\5ba6371e-e7f8-4738-bb94-e1efd97424b7"
     os.makedirs(results_dir, exist_ok=True)
