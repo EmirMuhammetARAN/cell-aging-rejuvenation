@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-Sampling Steps Ablation & Pseudo-Timelapse Analysis
----------------------------------------------------
+Sampling Steps Ablation and Pseudo-Timelapse Analysis (Full Population: N=645)
+------------------------------------------------------------------------------
 Proves the 'Single-Step vs Multi-Step Iterative Transport' Hypothesis:
 Evaluates LDM across sampling step counts: N in [1, 2, 5, 10, 25, 50]
+Across all 645 test cells (327 Young aging + 318 Senescent rejuvenation = 3,870 evaluations).
+
 Quantifies:
 1. Target Classifier Confidence (%) and Phenotypic Accuracy
 2. Cytoplasmic Shannon Entropy (bits)
@@ -23,6 +25,11 @@ from torchvision.utils import save_image
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import shutil
+
+torch.backends.cudnn.benchmark = True
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+torch.set_float32_matmul_precision('medium')
 
 base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, base_dir)
@@ -119,34 +126,31 @@ for task, in_sub, fname, ldm_label, cls_target, target_name, strength, cfg in ex
     
     print(f"\n[*] Processing Exemplar: {task} - {fname}")
     for s in step_counts:
+        save_fname = f"{task}_{fname[:-4]}_step{s}.png"
+        save_path = os.path.join(steps_img_dir, save_fname)
+        
         set_seed(2026)
         t0 = time.time()
-        with torch.no_grad():
+        with torch.inference_mode():
             out_tensor = ldm.translate(
                 tensor_in, target_labels=torch.tensor([ldm_label], device=DEVICE),
                 strength=strength, num_steps=s, use_ema=True, guidance_scale=cfg
             )
         dt = time.time() - t0
         
-        # Save image file using torchvision (out_tensor is already in [0, 1] from CellLDM)
-        save_fname = f"{task}_{fname[:-4]}_step{s}.png"
-        save_path = os.path.join(steps_img_dir, save_fname)
         save_image(out_tensor.cpu(), save_path)
         
-        # Convert cleanly to numpy uint8 matching seed_sweep.py
         out_denorm = (out_tensor.cpu()[0].clamp(0.0, 1.0) * 255.0).permute(1, 2, 0).numpy().astype(np.uint8)
         pil_out = Image.fromarray(out_denorm)
         
-        # Classifier evaluation
         cls_t = cls_transform(pil_out).unsqueeze(0).to(DEVICE)
-        with torch.no_grad():
+        with torch.inference_mode():
             logits = classifier(cls_t)
             probs = F.softmax(logits, dim=1).cpu().numpy()[0]
             pred = probs.argmax()
             conf = float(probs[cls_target] * 100.0)
             success = 1 if pred == cls_target else 0
             
-        # Entropy & Deformation
         gray_out = cv2.cvtColor(out_denorm, cv2.COLOR_RGB2GRAY)
         h_val = compute_shannon_entropy(gray_out.flatten())
         diff_energy = float(np.mean(np.abs(out_denorm.astype(float) - np_in.astype(float))))
@@ -164,31 +168,89 @@ for task, in_sub, fname, ldm_label, cls_target, target_name, strength, cfg in ex
         })
 
 print("\n" + "=" * 80)
-print("2. RUNNING QUANTITATIVE STEP SWEEP ON 30 AGING & 30 REJUVENATION TEST CELLS")
+print("2. RUNNING QUANTITATIVE STEP SWEEP ON FULL TEST POPULATION (N=645 CELL TRANSITIONS)")
 print("=" * 80)
 
-# Evaluate a larger cohort of 30 test cells per task to produce statistical convergence curves
-aging_cohort = sorted(os.listdir(os.path.join(base_dir, 'data/processed_v4/test/young')))[:30]
-reju_cohort = sorted(os.listdir(os.path.join(base_dir, 'data/processed_v4/test/senescent')))[:30]
+# Full test population
+aging_cohort = sorted(os.listdir(os.path.join(base_dir, 'data/processed_v4/test/young')))
+reju_cohort = sorted(os.listdir(os.path.join(base_dir, 'data/processed_v4/test/senescent')))
 
+print(f"[*] Full Population: {len(aging_cohort)} Young (Aging) + {len(reju_cohort)} Senescent (Rejuvenation) = {len(aging_cohort) + len(reju_cohort)} cells")
+
+csv_path = os.path.join(results_dir, "sampling_steps_ablation_metrics.csv")
 quantitative_records = []
+evaluated_keys = {}
+
+# Check for existing checkpoint records to allow resuming
+if os.path.exists(csv_path):
+    try:
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                rec = {
+                    'Task': row['Task'],
+                    'Filename': row['Filename'],
+                    'Steps': int(row['Steps']),
+                    'Transition_Success': int(row['Transition_Success']),
+                    'Target_Confidence_Pct': float(row['Target_Confidence_Pct']),
+                    'Shannon_Entropy_bits': float(row['Shannon_Entropy_bits']),
+                    'Deformation_Energy': float(row['Deformation_Energy'])
+                }
+                k = (rec['Task'], rec['Filename'], rec['Steps'])
+                evaluated_keys[k] = rec
+        print(f"[*] Checkpoint: Found {len(evaluated_keys)} existing evaluations in {csv_path}")
+    except Exception as e:
+        print(f"[!] Notice when reading existing CSV: {e}")
 
 cohort_tasks = [
     ('Aging', 'data/processed_v4/test/young', aging_cohort, 1, 0, 0.75, 4.0),
     ('Rejuvenation', 'data/processed_v4/test/senescent', reju_cohort, 0, 1, 0.65, 3.5)
 ]
 
+fieldnames = ['Task', 'Filename', 'Steps', 'Transition_Success', 'Target_Confidence_Pct', 'Shannon_Entropy_bits', 'Deformation_Energy']
+
+# Open CSV in append mode if exists and has valid header, otherwise write header
+file_exists = os.path.exists(csv_path) and os.path.getsize(csv_path) > 0
+csv_file = open(csv_path, 'a', newline='', encoding='utf-8')
+csv_writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+if not file_exists:
+    csv_writer.writeheader()
+    csv_file.flush()
+
+total_cohort_cells = len(aging_cohort) + len(reju_cohort)
+overall_processed = 0
+start_time_all = time.time()
+
 for task, in_sub, cell_list, ldm_label, cls_target, strength, cfg in cohort_tasks:
     print(f"\n[*] Evaluating {task} cohort (N={len(cell_list)}) across {step_counts} steps...")
+    
     for idx, fname in enumerate(cell_list):
+        overall_processed += 1
+        t_cell_start = time.time()
+        
+        # Check if all steps already evaluated
+        cell_complete = all((task, fname, s) in evaluated_keys for s in step_counts)
+        if cell_complete:
+            for s in step_counts:
+                quantitative_records.append(evaluated_keys[(task, fname, s)])
+            if overall_processed % 25 == 0 or overall_processed == total_cohort_cells:
+                print(f"    [{overall_processed:3d}/{total_cohort_cells}] {task} cell {fname} loaded from checkpoint.")
+            continue
+            
         p_in = os.path.join(base_dir, in_sub, fname)
         pil_in = Image.open(p_in).convert('RGB')
         tensor_in = ldm_transform(pil_in).unsqueeze(0).to(DEVICE, memory_format=torch.channels_last)
         np_in = np.array(pil_in)
         
         for s in step_counts:
+            k = (task, fname, s)
+            if k in evaluated_keys:
+                rec = evaluated_keys[k]
+                quantitative_records.append(rec)
+                continue
+                
             set_seed(2026)
-            with torch.no_grad():
+            with torch.inference_mode():
                 out_tensor = ldm.translate(
                     tensor_in, target_labels=torch.tensor([ldm_label], device=DEVICE),
                     strength=strength, num_steps=s, use_ema=True, guidance_scale=cfg
@@ -197,7 +259,7 @@ for task, in_sub, cell_list, ldm_label, cls_target, strength, cfg in cohort_task
             pil_out = Image.fromarray(out_np)
             
             cls_t = cls_transform(pil_out).unsqueeze(0).to(DEVICE)
-            with torch.no_grad():
+            with torch.inference_mode():
                 logits = classifier(cls_t)
                 probs = F.softmax(logits, dim=1).cpu().numpy()[0]
                 pred = probs.argmax()
@@ -208,7 +270,7 @@ for task, in_sub, cell_list, ldm_label, cls_target, strength, cfg in cohort_task
             h_val = compute_shannon_entropy(gray_out.flatten())
             diff_energy = float(np.mean(np.abs(out_np.astype(float) - np_in.astype(float))))
             
-            quantitative_records.append({
+            rec = {
                 'Task': task,
                 'Filename': fname,
                 'Steps': s,
@@ -216,39 +278,50 @@ for task, in_sub, cell_list, ldm_label, cls_target, strength, cfg in cohort_task
                 'Target_Confidence_Pct': round(conf, 2),
                 'Shannon_Entropy_bits': round(h_val, 4),
                 'Deformation_Energy': round(diff_energy, 3)
-            })
+            }
+            quantitative_records.append(rec)
+            evaluated_keys[k] = rec
+            csv_writer.writerow(rec)
             
-        if (idx + 1) % 10 == 0:
-            print(f"    [{idx+1}/{len(cell_list)}] Cohort cells processed...")
+        csv_file.flush()
+        t_cell = time.time() - t_cell_start
+        
+        if overall_processed % 5 == 0 or overall_processed == total_cohort_cells:
+            elapsed = time.time() - start_time_all
+            rem_cells = total_cohort_cells - overall_processed
+            avg_per_cell = elapsed / max(1, overall_processed)
+            eta_min = (rem_cells * avg_per_cell) / 60.0
+            print(f"    [{overall_processed:3d}/{total_cohort_cells}] {task} ({idx+1}/{len(cell_list)}) processed | cell time: {t_cell:.1f}s | ETA: {eta_min:.1f}m")
 
-# Save CSV
-csv_path = os.path.join(results_dir, "sampling_steps_ablation_metrics.csv")
+csv_file.close()
+
+# Re-sort and save clean final CSV
 with open(csv_path, 'w', newline='', encoding='utf-8') as f:
-    writer = csv.DictWriter(f, fieldnames=quantitative_records[0].keys())
+    writer = csv.DictWriter(f, fieldnames=fieldnames)
     writer.writeheader()
     writer.writerows(quantitative_records)
-print(f"\n[OK] Saved quantitative step records to {csv_path}")
+print(f"\n[OK] Successfully finalized {len(quantitative_records)} records to {csv_path}")
 
 print("\n" + "=" * 80)
 print("3. RENDERING 300 DPI PSEUDO-TIMELAPSE PUBLICATION PANEL")
 print("=" * 80)
 
-# Build figure
 fig = plt.figure(figsize=(25, 15), dpi=300)
-gs = gridspec.GridSpec(4, 8, width_ratios=[1, 1, 1, 1, 1, 1, 1, 1.4], wspace=0.08, hspace=0.22)
+gs = gridspec.GridSpec(4, 8, figure=fig, width_ratios=[1.1, 1, 1, 1, 1, 1, 1, 1.45],
+                       wspace=0.08, hspace=0.22)
 
 col_headers = [
-    "Source Input Cell\n(Control Baseline)",
-    "LDM (Step N = 1)\n(Single-Shot GAN-like)",
-    "LDM (Step N = 2)\n(Early Coarse Perturbation)",
-    "LDM (Step N = 5)\n(Boundary Formation)",
-    "LDM (Step N = 10)\n(Intermediate Deformation)",
-    "LDM (Step N = 25)\n(Fine Feature Convergence)",
-    "LDM (Step N = 50)\n(Full Biological Attractor)",
-    "Sampling Steps Ablation Card\n(ODE Integration Dynamics)"
+    "Input Cell\n(Original Phenotype)",
+    "Step 1\n(N=1, GAN-like)",
+    "Step 2\n(N=2, Early Latent)",
+    "Step 5\n(N=5, Boundary)",
+    "Step 10\n(N=10, Critical)",
+    "Step 25\n(N=25, Refined)",
+    "Step 50\n(N=50, Converged)",
+    "Quantitative Trajectory\n& Metrics Card"
 ]
 
-for row_idx, (task, in_sub, fname, _, _, target_name, _, _) in enumerate(exemplars):
+for row_idx, (task, in_sub, fname, ldm_label, cls_target, target_name, strength, cfg) in enumerate(exemplars):
     ex_data = exemplar_results[(task, fname)]
     
     # 0: Input
@@ -312,7 +385,7 @@ if artifact_dir and os.path.exists(artifact_dir):
 print(f"[OK] Saved 300 DPI Pseudo-Timelapse Panel: {out_panel_name}")
 
 print("\n" + "=" * 80)
-print("4. RENDERING STEP CONVERGENCE STATISTICAL CURVES")
+print("4. RENDERING STEP CONVERGENCE STATISTICAL CURVES (FULL POPULATION N=645)")
 print("=" * 80)
 
 fig, axes = plt.subplots(1, 3, figsize=(18, 5.5), dpi=300)
@@ -333,29 +406,29 @@ for task_name, color in [('Aging', '#3b82f6'), ('Rejuvenation', '#10b981')]:
         means_diff.append(np.mean([r['Deformation_Energy'] for r in s_recs]))
         means_ent.append(np.mean([r['Shannon_Entropy_bits'] for r in s_recs]))
         
-    # Curve 1: Confidence
-    axes[0].plot(step_counts, means_conf, marker='o', linewidth=2.5, color=color, label=f"{task_name} Confidence")
-    axes[0].plot(step_counts, means_acc, marker='s', linestyle='--', linewidth=1.5, color=color, alpha=0.6, label=f"{task_name} ACC")
+    # Curve 1: Confidence & Accuracy
+    axes[0].plot(step_counts, means_conf, marker='o', linewidth=2.5, color=color, label=f"{task_name} Conf (%)")
+    axes[0].plot(step_counts, means_acc, marker='s', linestyle='--', linewidth=1.5, color=color, alpha=0.6, label=f"{task_name} ACC (%)")
     
     # Curve 2: Deformation Energy
-    axes[1].plot(step_counts, means_diff, marker='o', linewidth=2.5, color=color, label=f"{task_name} Deformation Energy")
+    axes[1].plot(step_counts, means_diff, marker='o', linewidth=2.5, color=color, label=f"{task_name} Deformation")
     
     # Curve 3: Entropy
     axes[2].plot(step_counts, means_ent, marker='o', linewidth=2.5, color=color, label=f"{task_name} Entropy (H)")
 
-axes[0].set_title("Classifier Transition Confidence vs. Steps", fontsize=12, fontweight='bold')
+axes[0].set_title("Classifier Transition Confidence vs. Steps (N=645)", fontsize=12, fontweight='bold')
 axes[0].set_xlabel("Diffusion Sampling Steps (N)", fontsize=11)
 axes[0].set_ylabel("ResNet-18 Target Probability (%)", fontsize=11)
 axes[0].set_xticks(step_counts)
 axes[0].legend(fontsize=9.5)
 
-axes[1].set_title("Physical Deformation Energy (|I_N - I_in|)", fontsize=12, fontweight='bold')
+axes[1].set_title("Physical Deformation Energy (|I_N - I_in|) (N=645)", fontsize=12, fontweight='bold')
 axes[1].set_xlabel("Diffusion Sampling Steps (N)", fontsize=11)
 axes[1].set_ylabel("Mean Absolute Pixel Deformation", fontsize=11)
 axes[1].set_xticks(step_counts)
 axes[1].legend(fontsize=9.5)
 
-axes[2].set_title("Cytoplasmic Entropy Convergence", fontsize=12, fontweight='bold')
+axes[2].set_title("Cytoplasmic Entropy Convergence (N=645)", fontsize=12, fontweight='bold')
 axes[2].set_xlabel("Diffusion Sampling Steps (N)", fontsize=11)
 axes[2].set_ylabel("Shannon Entropy (bits)", fontsize=11)
 axes[2].set_xticks(step_counts)
@@ -373,9 +446,9 @@ print(f"[OK] Saved Convergence Curves: {curve_out_name}")
 # Statistical Report
 report_lines = [
     "=" * 80,
-    "SAMPLING STEPS ABLATION & MULTI-STEP TRANSPORT PROOF REPORT",
+    "SAMPLING STEPS ABLATION & MULTI-STEP TRANSPORT PROOF REPORT (FULL POPULATION)",
     f"Tested Steps: {step_counts}",
-    f"Cohort Size: N = 30 Aging + 30 Rejuvenation test cells (Total {len(quantitative_records)} evaluations)",
+    f"Cohort Size: N = {len(aging_cohort)} Aging + {len(reju_cohort)} Rejuvenation test cells (Total {len(quantitative_records)} evaluations)",
     "=" * 80,
     ""
 ]
@@ -399,7 +472,4 @@ print("\n" + rep_txt)
 with open(os.path.join(results_dir, "sampling_steps_statistical_report.txt"), 'w', encoding='utf-8') as f:
     f.write(rep_txt)
 print("[OK] Saved statistical report.")
-print("[FINISHED] All step ablation experiments and 300 DPI figures completed!")
-
-if __name__ == '__main__':
-    pass
+print("[FINISHED] Full population step ablation experiments and 300 DPI figures completed!")
