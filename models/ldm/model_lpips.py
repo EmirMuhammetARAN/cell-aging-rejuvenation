@@ -149,7 +149,7 @@ class CellLDM(nn.Module):
 
     @torch.no_grad()
     def translate(self, images, target_labels, strength=0.6, num_steps=50, 
-                  use_ema=True, guidance_scale=3.0):
+                  use_ema=True, guidance_scale=3.0, noise=None):
         unet = self.ema_unet if (use_ema and self.ema_unet is not None) else self.unet
         unet.eval()
 
@@ -161,7 +161,8 @@ class CellLDM(nn.Module):
         start_step = int(len(timesteps) * (1 - strength))
         t_start = timesteps[start_step]
 
-        noise = torch.randn_like(latents)
+        if noise is None:
+            noise = torch.randn_like(latents)
         noisy_latents = self.inference_scheduler.add_noise(latents, noise, t_start)
         
         uncond_labels = torch.full((images.shape[0],), self.num_classes, dtype=torch.long, device=images.device)
@@ -177,6 +178,116 @@ class CellLDM(nn.Module):
                 noise_pred = unet(noisy_latents, t_batch, class_labels=target_labels).sample
             
             noisy_latents = self.inference_scheduler.step(noise_pred, t, noisy_latents).prev_sample
+
+        result = self.decode(noisy_latents)
+        result = (result.clamp(-1, 1) + 1) / 2
+        return result
+
+    @torch.no_grad()
+    def translate_masked(self, images, target_labels, cell_mask,
+                         strength=0.6, num_steps=50,
+                         use_ema=True, guidance_scale=3.0,
+                         dilation_px=8, noise=None):
+        """
+        Mask-guided SDEdit for MSC senescence translation.
+
+        Adapts the RePaint inpainting strategy (Lugmayr et al., CVPR 2022)
+        to SDEdit-style image-to-image translation for MSC morphology.
+        At each denoising step the background region (outside the dilated
+        cell mask) is kept anchored to the correspondingly-noised original
+        latent, so only the foreground cell is transformed.
+
+        Args:
+            images:        Input image tensor, shape (B, 3, H, W), range [-1,1].
+            target_labels: Class label tensor, shape (B,).
+            cell_mask:     Binary foreground mask, shape (B, 1, H, W) or
+                           (B, H, W), values in {0, 1}, pixel space (H x W).
+                           Typically the output of Mask R-CNN thresholded to
+                           a single foreground region.
+            strength:      SDEdit noise strength (0=no change, 1=full denoise).
+            num_steps:     Number of DDIM inference steps.
+            use_ema:       Whether to use EMA weights.
+            guidance_scale: Classifier-free guidance scale.
+            dilation_px:   Morphological dilation radius (pixels) applied to
+                           the mask before downsampling to latent space, to
+                           create a soft editing boundary and reduce artefacts
+                           at the cell boundary.
+            noise:         Optional pre-drawn noise tensor (B, 4, 64, 64) for
+                           strictly paired comparison with unmasked SDEdit.
+
+        Returns:
+            Translated image tensor, shape (B, 3, H, W), range [0, 1].
+        """
+        unet = self.ema_unet if (use_ema and self.ema_unet is not None) else self.unet
+        unet.eval()
+
+        # --- 1. Encode original image to latent space ---
+        latents_orig = self.encode(images)          # (B, 4, 64, 64)
+
+        # --- 2. Build latent-space mask ---
+        if cell_mask.dim() == 3:
+            cell_mask = cell_mask.unsqueeze(1)      # (B, 1, H, W)
+        mask_px = cell_mask.float().to(images.device)
+
+        # Dilate in pixel space with max-pool to soften the boundary
+        if dilation_px > 0:
+            mask_px = F.max_pool2d(
+                mask_px,
+                kernel_size=2 * dilation_px + 1,
+                stride=1,
+                padding=dilation_px,
+            )
+
+        # Downsample to latent resolution (512 -> 64, factor 8)
+        lat_h, lat_w = latents_orig.shape[2], latents_orig.shape[3]
+        mask_lat = F.interpolate(
+            mask_px, size=(lat_h, lat_w), mode='nearest'
+        )                                           # (B, 1, 64, 64)
+        mask_lat = mask_lat.expand_as(latents_orig) # (B, 4, 64, 64)
+
+        # --- 3. Add noise up to the start timestep (same as translate) ---
+        self.inference_scheduler.set_timesteps(num_steps)
+        timesteps = self.inference_scheduler.timesteps
+
+        start_step = int(len(timesteps) * (1 - strength))
+        t_start = timesteps[start_step]
+
+        if noise is None:
+            noise = torch.randn_like(latents_orig)
+        noisy_latents = self.inference_scheduler.add_noise(latents_orig, noise, t_start)
+
+        uncond_labels = torch.full(
+            (images.shape[0],), self.num_classes,
+            dtype=torch.long, device=images.device
+        )
+
+        # --- 4. Denoising loop with background anchoring ---
+        step_timesteps = timesteps[start_step:]
+        for i, t in enumerate(step_timesteps):
+            t_batch = t.unsqueeze(0).repeat(images.shape[0]).to(images.device)
+
+            # Classifier-free guidance
+            if guidance_scale > 1.0:
+                noise_pred_cond   = unet(noisy_latents, t_batch, class_labels=target_labels).sample
+                noise_pred_uncond = unet(noisy_latents, t_batch, class_labels=uncond_labels).sample
+                noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
+            else:
+                noise_pred = unet(noisy_latents, t_batch, class_labels=target_labels).sample
+
+            noisy_latents = self.inference_scheduler.step(noise_pred, t, noisy_latents).prev_sample
+
+            # --- RePaint-style background anchoring (correctly aligned to t_prev) ---
+            # scheduler.step() transitions the sample to the next timestep in the schedule.
+            # Background must be anchored to the original latent at t_prev, not the previous t.
+            if i < len(step_timesteps) - 1:
+                t_prev = step_timesteps[i + 1].reshape(1).to(images.device)
+                noisy_orig_prev = self.inference_scheduler.add_noise(latents_orig, noise, t_prev)
+            else:
+                # Final step: sample has fully denoised to t=0
+                noisy_orig_prev = latents_orig
+
+            # Blend: foreground from denoised prediction, background from anchored original
+            noisy_latents = mask_lat * noisy_latents + (1.0 - mask_lat) * noisy_orig_prev
 
         result = self.decode(noisy_latents)
         result = (result.clamp(-1, 1) + 1) / 2

@@ -99,8 +99,8 @@ def extract_masks_for_dataset(model, img_dir, save_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Mask R-CNN Single-Cell Mask Extractor")
-    parser.add_argument('--target', choices=['ldm', 'cyclegan', 'all'], default='all',
-                        help="Target dataset to extract: ldm, cyclegan, or all")
+    parser.add_argument('--target', choices=['ldm', 'cyclegan', 'input', 'all'], default='all',
+                        help="Target dataset to extract: ldm, cyclegan, input, or all")
     args = parser.parse_args()
     
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -112,6 +112,13 @@ def main():
     config = InferenceConfig()
     model = modellib.MaskRCNN(mode="inference", config=config, model_dir=os.path.dirname(weights_path))
     model.load_weights(weights_path, by_name=True)
+
+    # Input test datasets (Young & Senescent)
+    if args.target in ['input', 'all']:
+        young_dir = os.path.join(base_dir, "data", "processed_v4", "test", "young")
+        sen_dir = os.path.join(base_dir, "data", "processed_v4", "test", "senescent")
+        extract_masks_for_dataset(model, young_dir, os.path.join(scratch_dir, "mrcnn_masks_input_young.npy"))
+        extract_masks_for_dataset(model, sen_dir, os.path.join(scratch_dir, "mrcnn_masks_input_senescent.npy"))
     
     # Official evaluated datasets: LDM Seed 2026 (Best FID) & CycleGAN Epoch 160
     if args.target in ['ldm', 'all']:
