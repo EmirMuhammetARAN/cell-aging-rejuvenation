@@ -81,7 +81,7 @@ class CUTModel(nn.Module):
             f_src_proj = self.mlp_heads[i](f_src_sampled)
             f_tgt_proj = self.mlp_heads[i](f_tgt_sampled)
 
-            total_nce += self.nce_loss_fn(f_tgt_proj, f_src_proj)
+            total_nce += self.nce_loss_fn(f_tgt_proj, f_src_proj.detach())
 
         return total_nce / len(self.nce_layers)
 

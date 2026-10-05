@@ -197,12 +197,13 @@ def analyze_and_report_direction(direction: str,
     print(f"{'Background MSE (lower = cleaner)':<38} {mean_bg_std_fov:>10.6f} {mean_bg_msk_fov:>10.6f} {mean_delta_bg:>+10.6f}")
     print(f"{'Cell-region MSE (transformation extent)':<38} {mean_cell_std_fov:>10.6f} {mean_cell_msk_fov:>10.6f} {mean_delta_cell:>+10.6f}")
     print(f"{'Edit SNR (Cell MSE / BG MSE)':<38} {mean_snr_std:>10.2f} {mean_snr_msk:>10.2f} {snr_fold:>9.1f}x")
-    print(f"{'Boundary Seam Gradient Discontinuity':<38} {mean_seam_std:>10.6f} {mean_seam_msk:>10.6f} {mean_seam_std-mean_seam_msk:>+10.6f}")
+    print(f"{'Boundary Ring Gradient Magnitude Diff':<38} {mean_seam_std:>10.6f} {mean_seam_msk:>10.6f} {mean_seam_std-mean_seam_msk:>+10.6f}")
     print(f"{'='*72}")
     print(f"[*] FOV-Level Background Reduction: {fov_bg_red_pct:+.2f}%")
     print(f"[*] Paired t-test: t({N_fovs-1}) = {t_bg:+.3f}, p = {p_t_bg:.4e} (95% CI: [{ci_bg[0]:+.6f}, {ci_bg[1]:+.6f}])")
     print(f"[*] Wilcoxon signed-rank test: W = {w_res_bg.statistic:.1f}, p = {p_w_bg:.4e}")
-    print(f"[*] Cell-region transformation preservation: delta={mean_delta_cell:+.6f} (p_t={p_t_cell:.4e}, p_w={p_w_cell:.4e})")
+    print(f"[*] Cell-region MSE difference: delta={mean_delta_cell:+.6f} (t={t_cell:+.2f}, p={p_t_cell:.4e})")
+    print(f"    (Note: Equivalence or non-inferiority requires a pre-specified margin)")
     print(f"{'='*72}\n")
 
     # Save Detailed Scientific Report
@@ -230,25 +231,28 @@ def analyze_and_report_direction(direction: str,
         f.write(f"   - Wilcoxon Signed-Rank Test:                  W = {w_res_bg.statistic:.1f}, p = {p_w_bg:.4e}\n")
         f.write(f"   - FOV-Level Background Reduction:             {fov_bg_red_pct:+.2f}%\n\n")
 
-        f.write(f"3. CELL MORPHOLOGY & TRANSFORMATION PRESERVATION\n")
+        f.write(f"3. CELL MORPHOLOGY & TRANSFORMATION DYNAMICS\n")
         f.write(f"   - Cell-Region MSE Standard (mean across FOVs): {mean_cell_std_fov:.6f}\n")
         f.write(f"   - Cell-Region MSE Masked   (mean across FOVs): {mean_cell_msk_fov:.6f}\n")
         f.write(f"   - Cell MSE Difference (Delta):                 {mean_delta_cell:+.6f}\n")
         f.write(f"   - 95% Confidence Interval:                    [{ci_cell[0]:+.6f}, {ci_cell[1]:+.6f}]\n")
         f.write(f"   - Paired t-test (Cell Transformation):        t({N_fovs-1}) = {t_cell:+.4f}, p = {p_t_cell:.4e}\n")
-        f.write(f"   - Wilcoxon Signed-Rank Test:                   W = {w_res_cell.statistic:.1f}, p = {p_w_cell:.4e}\n\n")
+        f.write(f"   - Wilcoxon Signed-Rank Test:                   W = {w_res_cell.statistic:.1f}, p = {p_w_cell:.4e}\n")
+        f.write(f"   - Interpretation: Cell MSE is slightly lower in masked SDEdit (-Delta = {mean_delta_cell:.6f}),\n")
+        f.write(f"     indicating slightly more conservative within-mask changes relative to unconstrained SDEdit.\n")
+        f.write(f"     Rigorous equivalence testing requires a pre-specified non-inferiority margin.\n\n")
 
-        f.write(f"4. EDIT SELECTIVITY & ARTIFACT ANALYSIS\n")
+        f.write(f"4. EDIT SELECTIVITY & BOUNDARY METRICS\n")
         f.write(f"   - Edit Signal-to-Disruption Ratio (Standard): {mean_snr_std:.2f}\n")
         f.write(f"   - Edit Signal-to-Disruption Ratio (Masked):   {mean_snr_msk:.2f} ({snr_fold:.1f}x higher specificity)\n")
-        f.write(f"   - Boundary Seam Gradient MSE (Standard):      {mean_seam_std:.6f}\n")
-        f.write(f"   - Boundary Seam Gradient MSE (Masked):        {mean_seam_msk:.6f}\n")
-        f.write(f"   - Boundary Seam Discontinuity Delta:          {mean_seam_std-mean_seam_msk:+.6f} (No edge seams)\n\n")
+        f.write(f"   - Boundary Ring Gradient MSE (Standard):      {mean_seam_std:.6f}\n")
+        f.write(f"   - Boundary Ring Gradient MSE (Masked):        {mean_seam_msk:.6f}\n")
+        f.write(f"   - Boundary Ring Gradient Magnitude Diff:      {mean_seam_std-mean_seam_msk:+.6f}\n")
+        f.write(f"     (Measured in the dilation transition ring; does not guarantee complete absence of boundary seams)\n\n")
 
         f.write(f"5. CONCLUSION\n")
         f.write(f"   Mask-guided SDEdit achieves a statistically significant {fov_bg_red_pct:.1f}% reduction\n")
-        f.write(f"   in background modification (p = {p_w_bg:.2e}, Wilcoxon test across {N_fovs} FOVs) while strictly\n")
-        f.write(f"   preserving cell-region morphological transformation and introducing zero boundary seam artifacts.\n")
+        f.write(f"   in background modification (p = {p_w_bg:.2e}, Wilcoxon test across {N_fovs} FOVs).\n")
 
     print(f"[OK] Saved full statistical results to:\n  - {csv_cells_path}\n  - {csv_fov_path}\n  - {report_path}\n")
 
@@ -264,7 +268,10 @@ def run_evaluation_for_direction(direction: str, args, model, device):
     strength = args.strength if args.strength is not None else (0.80 if direction == 'aging' else 0.70)
     cfg = args.cfg if args.cfg is not None else (5.0 if direction == 'aging' else 4.0)
     steps = args.steps
-    dilation_px = args.dilation_px
+    if direction == 'aging':
+        dilation_px = args.dilation_aging if args.dilation_aging is not None else (args.dilation_px if args.dilation_px is not None else 24)
+    else:
+        dilation_px = args.dilation_rejuvenation if args.dilation_rejuvenation is not None else (args.dilation_px if args.dilation_px is not None else 8)
 
     dir_out = os.path.join(args.output_dir, direction)
     std_dir = os.path.join(dir_out, 'standard')
@@ -484,8 +491,12 @@ def main():
                         help='Classifier-free guidance scale (default: 5.0 aging, 4.0 rejuv)')
     parser.add_argument('--steps', type=int, default=50,
                         help='DDIM sampling steps')
-    parser.add_argument('--dilation_px', type=int, default=8,
-                        help='Mask dilation radius in pixels')
+    parser.add_argument('--dilation_px', type=int, default=None,
+                        help='Fallback mask dilation radius in pixels if direction-specific is not set')
+    parser.add_argument('--dilation_aging', type=int, default=None,
+                        help='Mask dilation radius in pixels for aging (default: 24 px)')
+    parser.add_argument('--dilation_rejuvenation', type=int, default=None,
+                        help='Mask dilation radius in pixels for rejuvenation (default: 8 px)')
     parser.add_argument('--max_images', type=int, default=None,
                         help='Optional cap on number of images per direction (for quick validation)')
     parser.add_argument('--seed', type=int, default=2026,
