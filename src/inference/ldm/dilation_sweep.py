@@ -103,7 +103,7 @@ def run_sweep_for_direction(direction: str, args, model, device, strength=None, 
         strength = 0.80 if direction == 'aging' else 0.70
     if cfg is None:
         cfg = 5.0 if direction == 'aging' else 4.0
-    steps = 50
+    steps = getattr(args, 'steps', 100)
 
     if out_dir is None:
         out_sweep_dir = os.path.join(args.output_dir, direction)
@@ -599,6 +599,8 @@ def main():
                         help='Number of validation cells per direction if --all_cells is not set')
     parser.add_argument('--batch_size', type=int, default=4,
                         help='Batch size for translation')
+    parser.add_argument('--steps', type=int, default=100,
+                        help='Number of DDIM sampling steps')
     parser.add_argument('--seed', type=int, default=2026,
                         help='Base seed for paired noise')
     parser.add_argument('--checkpoint', type=str,
@@ -700,6 +702,19 @@ def main():
                 cfg=cfg_dict[d]['cfg'],
                 out_dir=cur_out_dir
             )
+
+    if args.config_preset in ['both', 'low_fid', 'high_acc']:
+        try:
+            import subprocess
+            overlay_script = os.path.join(root_dir, 'scratch', 'generate_overlay_dilation_plots.py')
+            ab_script = os.path.join(root_dir, 'scratch', 'generate_dual_regime_dilation_plots.py')
+            if os.path.exists(overlay_script):
+                subprocess.run([sys.executable, overlay_script], check=True)
+            if os.path.exists(ab_script):
+                subprocess.run([sys.executable, ab_script], check=True)
+            print("[*] Successfully generated dual-regime overlay and A/B publication figures!")
+        except Exception as e:
+            print(f"[!] Could not auto-trigger dual-regime plots: {e}")
 
     print(f"\n[DONE] Dilation radius sweep completed successfully!")
 

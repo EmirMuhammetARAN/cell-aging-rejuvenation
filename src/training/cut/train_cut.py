@@ -71,7 +71,7 @@ if __name__ == '__main__':
     BATCH_SIZE = 1
     LR = 2e-4
     BETA1, BETA2 = 0.5, 0.999
-    SAVE_EVERY = 10
+    SAVE_EVERY = 5
     LAMBDA_NCE = 1.0
     LAMBDA_IDT = 1.0
     RESUME_EPOCH = -1  # Set -1 to auto-detect latest checkpoint, 0 for scratch, or >0 for specific
