@@ -190,6 +190,8 @@ def main():
     parser = argparse.ArgumentParser(description="3-Way Controlled Ablation Benchmark")
     parser.add_argument('--steps', type=int, default=100, help='Number of DDIM steps')
     parser.add_argument('--batch_size', type=int, default=4, help='Batch size for generation')
+    parser.add_argument('--seed', type=int, default=None, help='Random seed for noise generation (default: 1000 + start_idx)')
+    parser.add_argument('--regime', type=str, default='both', choices=['low_fid', 'high_acc', 'both'], help='Evaluation regime')
     parser.add_argument('--eval_only', action='store_true', help='Skip v15 generation and evaluate metrics only')
     args = parser.parse_args()
 
@@ -204,10 +206,12 @@ def main():
     print("=" * 90)
     print(f"  - v15 Checkpoint:      {v15_ckpt}")
     print(f"  - DDIM Steps:          {args.steps}")
+    print(f"  - Regime:              {args.regime.upper()}")
+    print(f"  - Seed Strategy:       {f'Fixed {args.seed}' if args.seed is not None else 'Paired (1000 + start_idx)'}")
     print(f"  - Device:              {device.upper()} ({torch.cuda.get_device_name(0) if device=='cuda' else 'CPU'})")
     print("=" * 90 + "\n")
 
-    regimes = {
+    all_regimes = {
         'low_fid': {
             'aging': {'strength': 0.75, 'cfg': 4.0, 'dilation': 24},
             'rejuvenation': {'strength': 0.65, 'cfg': 3.5, 'dilation': 8}
@@ -217,6 +221,7 @@ def main():
             'rejuvenation': {'strength': 0.70, 'cfg': 5.0, 'dilation': 8}
         }
     }
+    regimes = all_regimes if args.regime == 'both' else {args.regime: all_regimes[args.regime]}
 
     source_paths = {
         'aging': os.path.join(root_dir, 'data', 'processed_v4', 'test', 'young'),
@@ -293,7 +298,10 @@ def main():
                     batch_lbls = torch.full((len(batch_fns),), target_label_val, dtype=torch.long, device=device)
 
                     # Strictly identical noise seed for pairing across v12, v14, and v15
-                    torch.manual_seed(1000 + start_idx)
+                    if args.seed is not None:
+                        torch.manual_seed(args.seed)
+                    else:
+                        torch.manual_seed(1000 + start_idx)
                     init_noise = torch.randn((len(batch_fns), 4, 64, 64), device=device, dtype=torch.float32)
 
                     # 1. v15 Standard (Unmasked full canvas translation)
