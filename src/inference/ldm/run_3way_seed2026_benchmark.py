@@ -295,9 +295,17 @@ def main():
     src_v12_rejuv = os.path.join(root_dir, 'results', 'generated', 'seed_sweep', 'seed_2026', 'rejuv')
 
     if not os.path.exists(v12_std_aging_dest) and os.path.exists(src_v12_aging):
-        print("[*] Reusing pre-computed v12 Seed 2026 Standard images (FID 46.86)...")
+        print("[*] Reusing pre-computed v12 Seed 2026 Standard images...")
         shutil.copytree(src_v12_aging, v12_std_aging_dest)
         shutil.copytree(src_v12_rejuv, v12_std_rejuv_dest)
+
+    # Prune non-mask files to ensure strictly paired cohort (N=327 Aging, N=315 Rejuvenation)
+    for direction, dest in [('aging', v12_std_aging_dest), ('rejuvenation', v12_std_rejuv_dest)]:
+        if os.path.exists(dest):
+            mrcnn_masks = np.load(PARAMS[direction]['mask'], allow_pickle=True).item()
+            for fn in list(os.listdir(dest)):
+                if fn not in mrcnn_masks or mrcnn_masks[fn].sum() == 0:
+                    os.remove(os.path.join(dest, fn))
 
     # 2. Execution order across models
     # v12 only needs 'masked' (standard is imported above)
