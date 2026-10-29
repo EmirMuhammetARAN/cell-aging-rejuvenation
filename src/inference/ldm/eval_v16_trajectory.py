@@ -141,7 +141,10 @@ def predict_resnet18(cls_resnet, imgs_01, bs=32):
 def run_trajectory(direction, args):
     is_rejuv = (direction.lower() == 'rejuvenation')
     dir_name = 'rejuvenation_trajectory' if is_rejuv else 'aging_trajectory'
-    out_base = os.path.join(root_dir, 'results', 'v16_stage2_evaluation', dir_name)
+    if getattr(args, 'out_dir', None):
+        out_base = os.path.join(args.out_dir, dir_name)
+    else:
+        out_base = os.path.join(root_dir, 'results', 'v16_stage2_evaluation', dir_name)
     os.makedirs(out_base, exist_ok=True)
 
     strength = args.rejuv_strength if is_rejuv else args.aging_strength
@@ -438,6 +441,8 @@ def main():
                    help='Trajectory direction to evaluate')
     p.add_argument('--ckpt', default='best_model_v16_stage2_msc.pt',
                    help='Checkpoint filename in checkpoints/ldm or absolute path')
+    p.add_argument('--out_dir', default=None,
+                   help='Custom root directory for outputs (defaults to results/v16_stage2_evaluation)')
     p.add_argument('--all', action='store_true', default=False,
                    help='Process full test cohort (Senescent N=318, Young N=327)')
     p.add_argument('--n_samples', type=int, default=None,
