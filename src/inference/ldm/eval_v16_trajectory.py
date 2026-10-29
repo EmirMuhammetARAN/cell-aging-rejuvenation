@@ -220,6 +220,22 @@ def run_trajectory(direction, args):
             b_tensors = torch.stack(real_input_tensors[b_slice])
             current_bs = len(b_paths)
 
+            batch_already_done = all(
+                os.path.exists(os.path.join(step_dirs[s], os.path.basename(p)))
+                for s in range(1, args.n_steps + 1)
+                for p in b_paths
+            )
+            if batch_already_done:
+                if len(montage_exemplars) < 10:
+                    for k in range(min(current_bs, 10 - len(montage_exemplars))):
+                        fname = os.path.basename(b_paths[k])
+                        cell_row = [b_tensors[k]]
+                        for s in range(1, args.n_steps + 1):
+                            step_img = TF.to_tensor(Image.open(os.path.join(step_dirs[s], fname)).convert('RGB'))
+                            cell_row.append(step_img)
+                        montage_exemplars.append(cell_row)
+                continue
+
             bx = (b_tensors * 2.0 - 1.0).to(dev)
             with torch.no_grad():
                 latents = model.encode(bx)
@@ -259,7 +275,9 @@ def run_trajectory(direction, args):
             print(f"  [Batch {b_idx + 1:2d}/{n_batches}] Processed {current_bs} cells through 5 steps | Elapsed: {elapsed:.0f}s, ETA: {remain:.0f}s", flush=True)
 
         print(f"\n[*] Generation complete across {n_total} cells in {time.time() - t_start:.1f}s!", flush=True)
-        del model, latents, bx
+        del model
+        if 'latents' in locals():
+            del latents, bx
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         gc.collect()
