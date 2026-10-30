@@ -1,26 +1,24 @@
 """
 Continuous 5-Step Passage Trajectory Evaluation (LDM v16 Stage 2 MSC)
 ======================================================================
-Evaluates gradual passage translation (-1 or +1 passage per step across 5 steps)
-using LDM v16 Stage 2 canonical Low-FID parameters with fixed latent noise.
+Evaluates gradual passage translation across 5 steps using LDM v16 Stage 2
+canonical Low-FID parameters with fixed latent noise.
 
-Modes:
-  - Rejuvenation: Senescent test crops (N=318) -> P_in - 1..5 (clamped to P=3.5)
-  - Aging:         Young test crops (N=327)     -> P_in + 1..5 (clamped to P=15.5)
-  - Both:          Runs rejuvenation and aging consecutively.
+Trajectory Modes (--traj_mode):
+  - proportional (default): Linearly interpolates each cell from its initial passage P_in
+    to the biological target endpoint (P=3.5 for Rejuvenation, P=15.5 for Aging)
+    in 5 equal steps (20%, 40%, 60%, 80%, 100%). Guarantees 100% of cells reach
+    the target biological passage at Step 5.
+  - fixed_delta: Subtracts or adds a fixed passage delta (-1.0 or +1.0 P) per step.
 
 Metrics computed per step:
   1. ConvNeXt-Tiny classifier v3: Mean / Median predicted passage & Delta P.
   2. ResNet-18 classifier (native 512x512): Target accuracy (%) & confidence (%).
-  3. Official FID score vs real reference cohort (pytorch-fid).
+  3. Dual Official FID scores (pytorch-fid):
+     - FID (Target Convergence): vs target reference class (test/young or test/senescent).
+     - FID_Realism (All-MSC Realism): vs full real MSC test cohort (N=645), measuring
+       pure image fidelity independent of intermediate passage shift.
   4. Mean brightness monitoring (verifying absence of contrast/whitening shift).
-
-Outputs (saved to results/v16_stage2_evaluation/<direction>_trajectory/):
-  - gen_step1..5/*.png
-  - <direction>_trajectory_montage.png
-  - <direction>_trajectory_curves.png
-  - <direction>_trajectory_summary.csv
-  - <direction>_trajectory_per_sample.csv
 """
 
 import argparse
@@ -173,7 +171,10 @@ def run_trajectory(direction, args):
 
     print(f"\n{'='*75}")
     print(f"   STARTING 5-STEP {direction.upper()} TRAJECTORY (N = {n_total} Cells)")
-    print(f"   Strength: {strength} | CFG: {cfg} | Step Delta: {step_sign * args.delta_step:+.1f} P | Clamp: {clamp_val}")
+    if args.traj_mode == 'proportional':
+        print(f"   Mode: Proportional (20% -> 100%) | Strength: {strength} | CFG: {cfg} | Endpoint Target: P{clamp_val}")
+    else:
+        print(f"   Mode: Fixed Delta ({step_sign * args.delta_step:+.1f} P/step) | Strength: {strength} | CFG: {cfg} | Clamp: P{clamp_val}")
     print(f"   Output: {out_base}")
     print(f"{'='*75}\n", flush=True)
 
@@ -244,10 +245,15 @@ def run_trajectory(direction, args):
                 batch_row_imgs = [b_tensors]
 
                 for s in range(1, args.n_steps + 1):
-                    if is_rejuv:
-                        target_p = np.maximum(clamp_val, b_p_in - (s * args.delta_step))
+                    frac = float(s) / float(args.n_steps)
+                    if args.traj_mode == 'proportional':
+                        start_p = np.maximum(clamp_val, b_p_in) if is_rejuv else np.minimum(clamp_val, b_p_in)
+                        target_p = start_p + frac * (clamp_val - start_p)
                     else:
-                        target_p = np.minimum(clamp_val, b_p_in + (s * args.delta_step))
+                        if is_rejuv:
+                            target_p = np.maximum(clamp_val, b_p_in - (s * args.delta_step))
+                        else:
+                            target_p = np.minimum(clamp_val, b_p_in + (s * args.delta_step))
                     target_p_tensor = torch.tensor(target_p, dtype=torch.float32, device=dev)
 
                     out = model.translate(bx, target_passage=target_p_tensor, cell_type=CELL_MSC,
@@ -314,24 +320,35 @@ def run_trajectory(direction, args):
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    # 4. Official FID calculation
-    print("\n[*] Calculating official FID scores vs reference test cohort...", flush=True)
+    # 4. Official Dual-FID calculation (Target Convergence FID + All-MSC Realism FID)
+    print("\n[*] Calculating official FID scores (Target Class & All-MSC Realism)...", flush=True)
     step_fids = {}
+    step_realism_fids = {}
     try:
-        step_fids[0] = float(fid_score.calculate_fid_given_paths([ref_dir, in_dir], batch_size=32, device=dev, dims=2048))
-        print(f"  -> Step 0 Baseline FID: {step_fids[0]:.2f}", flush=True)
-    except Exception as e:
-        print(f"  [!] FID Step 0 error: {e}")
-        step_fids[0] = -1.0
+        block_idx = fid_score.InceptionV3.BLOCK_INDEX_BY_DIM[2048]
+        inc_model = fid_score.InceptionV3([block_idx]).to(dev).eval()
+        ref_files = sorted([os.path.join(ref_dir, f) for f in os.listdir(ref_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
+        all_real_files = sorted(
+            [os.path.join(y_test_dir, f) for f in os.listdir(y_test_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))] +
+            [os.path.join(s_test_dir, f) for f in os.listdir(s_test_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+        )
+        mu_ref, sig_ref = fid_score.calculate_activation_statistics(ref_files, inc_model, batch_size=32, dims=2048, device=dev, num_workers=0)
+        mu_all, sig_all = fid_score.calculate_activation_statistics(all_real_files, inc_model, batch_size=32, dims=2048, device=dev, num_workers=0)
 
-    for s in range(1, args.n_steps + 1):
-        try:
-            fid_val = float(fid_score.calculate_fid_given_paths([ref_dir, step_dirs[s]], batch_size=32, device=dev, dims=2048))
-            step_fids[s] = fid_val
-            print(f"  -> Step {s} Low-FID: {fid_val:.2f}", flush=True)
-        except Exception as e:
-            print(f"  [!] FID Step {s} error: {e}")
-            step_fids[s] = -1.0
+        for s in range(args.n_steps + 1):
+            cur_files = in_files if s == 0 else [os.path.join(step_dirs[s], fn) for fn in all_filenames]
+            mu_s, sig_s = fid_score.calculate_activation_statistics(cur_files, inc_model, batch_size=32, dims=2048, device=dev, num_workers=0)
+            step_fids[s] = float(fid_score.calculate_frechet_distance(mu_s, sig_s, mu_ref, sig_ref))
+            step_realism_fids[s] = float(fid_score.calculate_frechet_distance(mu_s, sig_s, mu_all, sig_all))
+            print(f"  -> Step {s} | Target FID: {step_fids[s]:.2f} | Realism FID (All-MSC): {step_realism_fids[s]:.2f}", flush=True)
+        del inc_model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception as e:
+        print(f"  [!] FID calculation error: {e}")
+        for s in range(args.n_steps + 1):
+            step_fids.setdefault(s, -1.0)
+            step_realism_fids.setdefault(s, -1.0)
 
     # 5. Summary CSV
     real_p = step_preds_convnext[0]
@@ -357,12 +374,19 @@ def run_trajectory(direction, args):
         target_conf_pct = float(np.mean(r_conf) * 100.0)
         bright_shift = float(np.mean(b_arr - step_brightness[0])) if s > 0 else 0.0
 
-        label = f"Step 0 (Real {'Senescent' if is_rejuv else 'Young'})" if s == 0 else f"Step {s} (Target P {step_sign * s * args.delta_step:+.1f})"
+        if s == 0:
+            label = f"Step 0 (Real {'Senescent' if is_rejuv else 'Young'})"
+        elif args.traj_mode == 'proportional':
+            pct = int(round((s / float(args.n_steps)) * 100))
+            label = f"Step {s} ({pct}% -> P{clamp_val})"
+        else:
+            label = f"Step {s} (Target P {step_sign * s * args.delta_step:+.1f})"
 
         summary_rows.append({
             'Step': s,
             'Label': label,
             'FID': round(step_fids[s], 2) if step_fids[s] > 0 else 'N/A',
+            'FID_Realism': round(step_realism_fids[s], 2) if step_realism_fids[s] > 0 else 'N/A',
             'ConvNeXt_Passage_Mean': round(float(np.mean(p_arr)), 2),
             'ConvNeXt_Passage_Median': round(float(np.median(p_arr)), 2),
             'Delta_Passage': round(delta_p, 2),
@@ -402,7 +426,10 @@ def run_trajectory(direction, args):
     print("[*] Generating trajectory curves figure...", flush=True)
     fig, axes = plt.subplots(1, 3, figsize=(18, 5), dpi=300)
     steps = list(range(args.n_steps + 1))
-    step_labels = ['Real\n(P_in)'] + [f'S{s}\n(P{step_sign * s * args.delta_step:+.0f})' for s in range(1, args.n_steps + 1)]
+    if args.traj_mode == 'proportional':
+        step_labels = ['Real\n(P_in)'] + [f'S{s}\n({int(round(s / args.n_steps * 100))}%)' for s in range(1, args.n_steps + 1)]
+    else:
+        step_labels = ['Real\n(P_in)'] + [f'S{s}\n(P{step_sign * s * args.delta_step:+.0f})' for s in range(1, args.n_steps + 1)]
 
     # 1. Passage
     ax = axes[0]
@@ -437,12 +464,14 @@ def run_trajectory(direction, args):
     # 3. FID
     ax = axes[2]
     fids = [f if isinstance(f, (int, float)) and f > 0 else np.nan for f in df_summary['FID'].values]
+    fids_real = [f if isinstance(f, (int, float)) and f > 0 else np.nan for f in df_summary['FID_Realism'].values]
     c_fid = '#d62728' if is_rejuv else '#9467bd'
-    ax.plot(steps, fids, 'o-', color=c_fid, linewidth=2.5, markersize=8, label=f"FID vs {'Young' if is_rejuv else 'Senescent'} Reference")
+    ax.plot(steps, fids, 'o-', color=c_fid, linewidth=2.5, markersize=8, label=f"Target FID (vs {'Young' if is_rejuv else 'Senescent'})")
+    ax.plot(steps, fids_real, 's--', color='#2b5c8f', linewidth=2.0, markersize=7, label='Realism FID (vs All Real MSCs)')
     ax.set_xticks(steps)
     ax.set_xticklabels(step_labels, fontsize=10)
     ax.set_ylabel('FID (Lower is Better)', fontsize=12, fontweight='bold')
-    ax.set_title('Distributional Convergence (FID)', fontsize=13, fontweight='bold')
+    ax.set_title('Distributional Convergence & Realism (FID)', fontsize=13, fontweight='bold')
     ax.grid(True, linestyle=':', alpha=0.6)
     ax.legend(frameon=True, fontsize=10)
 
@@ -471,8 +500,11 @@ def main():
     p.add_argument('--rejuv_cfg', type=float, default=3.5)
     p.add_argument('--aging_strength', type=float, default=0.75)
     p.add_argument('--aging_cfg', type=float, default=4.0)
+    p.add_argument('--traj_mode', choices=['proportional', 'fixed_delta'], default='proportional',
+                   help='Proportional (20%..100% interpolation to endpoint) or fixed_delta per step')
     p.add_argument('--n_steps', type=int, default=5, help='Number of gradual trajectory steps')
-    p.add_argument('--delta_step', type=float, default=1.0, help='Passage delta per step')
+    p.add_argument('--delta_step', type=float, default=1.0,
+                   help='Passage delta per step (used when traj_mode=fixed_delta)')
     p.add_argument('--min_passage', type=float, default=3.5, help='Biological young median clamp')
     p.add_argument('--max_passage', type=float, default=15.5, help='Biological senescent mean clamp')
     p.add_argument('--skip_generation', action='store_true',

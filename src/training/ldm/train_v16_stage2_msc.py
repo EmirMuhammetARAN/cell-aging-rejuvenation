@@ -59,7 +59,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 torch.set_float32_matmul_precision('medium')
 
-MSC_SWEEP_PASSAGES = [6, 12, 18, 24, 30, 36]
+MSC_SWEEP_PASSAGES = [3.5, 6.0, 9.0, 12.0, 15.5, 19.0]
 
 
 def parse_args():
@@ -67,25 +67,25 @@ def parse_args():
     p.add_argument('--exp_name', default='v16_stage2_msc')
     p.add_argument('--base_ckpt', default='best_model_v16_fibroblast_passage.pt',
                    help='Name or path of pre-trained Stage 1 checkpoint in checkpoints/ldm')
-    p.add_argument('--epochs', type=int, default=90,
-                   help='Total Stage 2 epochs (continues from 30 -> 90 with cosine warm-restart)')
+    p.add_argument('--epochs', type=int, default=120,
+                   help='Total Stage 2 epochs (continues from 90 -> 120 with class-calibrated warm-restart)')
     p.add_argument('--warmup_epochs', type=float, default=2.0)
     p.add_argument('--batch_size', type=int, default=4)
     p.add_argument('--accum', type=int, default=4)
-    p.add_argument('--lr', type=float, default=5e-5,
+    p.add_argument('--lr', type=float, default=3e-5,
                    help='Peak learning rate for Stage 2 MSC optimization')
     p.add_argument('--min_lr', type=float, default=1e-6)
     p.add_argument('--weight_decay', type=float, default=1e-2)
     p.add_argument('--lpips_weight', type=float, default=0.1)
     p.add_argument('--cfg_drop', type=float, default=0.10)
-    p.add_argument('--sampler_power', type=float, default=0.7,
-                   help='Inverse frequency power for passage-balanced sampling')
+    p.add_argument('--sampler_power', type=float, default=0.5,
+                   help='Intra-class inverse frequency power for 50/50 class-balanced sampling')
     p.add_argument('--sampler_bin', type=float, default=1.0,
-                   help='Passage bin width for balanced intermediate passage sampling')
+                   help='Passage bin width for intra-class passage sampling')
     p.add_argument('--val_stride', type=int, default=2, help='use every N-th val image for fast val loss')
     p.add_argument('--val_freq', type=int, default=2)
     p.add_argument('--save_interval', type=int, default=15,
-                   help='Save milestone checkpoints every N epochs (e.g., 45, 60, 75, 90)')
+                   help='Save milestone checkpoints every N epochs (e.g., 45, 60, 75, 90, 105, 120)')
     p.add_argument('--num_workers', type=int, default=4)
     p.add_argument('--seed', type=int, default=2026)
     p.add_argument('--smoke', type=int, default=0,
@@ -95,7 +95,7 @@ def parse_args():
 
 @torch.no_grad()
 def run_validation(model, val_loader, device, amp_dtype):
-    """Deterministic val epsilon-MSE on EMA weights across young (P<=12), intermediate (12<P<24), and senescent (P>=24)."""
+    """Deterministic val epsilon-MSE on EMA weights across young (P<=6.5), intermediate (6.5<P<14), and senescent (P>=14)."""
     model.unet.eval()
     model.cond.eval()
     sums = {'all': 0.0, 'young': 0.0, 'inter': 0.0, 'senes': 0.0}
@@ -110,9 +110,9 @@ def run_validation(model, val_loader, device, amp_dtype):
             l = l.float().cpu().numpy()
             p = pas.cpu().numpy()
             for g, m in (('all', np.ones_like(p, bool)),
-                         ('young', p <= 12),
-                         ('inter', (p > 12) & (p < 24)),
-                         ('senes', p >= 24)):
+                         ('young', p <= 6.5),
+                         ('inter', (p > 6.5) & (p < 14.0)),
+                         ('senes', p >= 14.0)):
                 sums[g] += float(l[m].sum())
                 cnts[g] += int(m.sum())
     return {k: (sums[k] / cnts[k] if cnts[k] else float('nan')) for k in sums}
@@ -133,9 +133,9 @@ def save_sweep(model, val_ds, results_dir, tag, device):
     real_y = val_ds[young_idx][0].unsqueeze(0).to(device)
     real_y_vis = (real_y.clamp(-1, 1) + 1) / 2
     rows_aging = [real_y_vis.cpu()]
-    aging_targets = [12, 18, 24, 30, 36]
+    aging_targets = [6.0, 9.0, 12.0, 15.5, 19.0]
     for tp in aging_targets:
-        out = model.translate(real_y, tp, cell_type=CELL_MSC, strength=0.7, guidance_scale=3.5, num_steps=50)
+        out = model.translate(real_y, tp, cell_type=CELL_MSC, strength=0.75, guidance_scale=4.0, num_steps=50)
         rows_aging.append(out.cpu())
     save_image(torch.cat(rows_aging, 0), os.path.join(results_dir, f'{tag}_sdedit_aging.png'), nrow=len(rows_aging))
 
@@ -144,9 +144,9 @@ def save_sweep(model, val_ds, results_dir, tag, device):
     real_s = val_ds[senes_idx][0].unsqueeze(0).to(device)
     real_s_vis = (real_s.clamp(-1, 1) + 1) / 2
     rows_rejuv = [real_s_vis.cpu()]
-    rejuv_targets = [30, 24, 18, 12, 6]
+    rejuv_targets = [15.5, 12.0, 9.0, 6.0, 3.5]
     for tp in rejuv_targets:
-        out = model.translate(real_s, tp, cell_type=CELL_MSC, strength=0.7, guidance_scale=3.5, num_steps=50)
+        out = model.translate(real_s, tp, cell_type=CELL_MSC, strength=0.65, guidance_scale=3.5, num_steps=50)
         rows_rejuv.append(out.cpu())
     save_image(torch.cat(rows_rejuv, 0), os.path.join(results_dir, f'{tag}_sdedit_rejuvenation.png'), nrow=len(rows_rejuv))
 
@@ -240,14 +240,20 @@ def main():
         prev_target_epochs = ckpt.get('phase_target_epochs', 30)
 
         if prev_target_epochs != args.epochs and start_epoch < args.epochs:
-            # Cosine Warm-Restart for extended Stage 2 training (e.g. Epoch 30 -> 90)
+            # Cosine Warm-Restart for extended Stage 2 training (e.g. Epoch 90 -> 120)
             phase_start_epoch = start_epoch
             phase_target_epochs = args.epochs
+            if os.path.exists(best_path):
+                backup_best = os.path.join(CKPT_DIR, f'best_model_{exp}_ep{start_epoch:02d}.pt')
+                if not os.path.exists(backup_best):
+                    import shutil
+                    shutil.copy2(best_path, backup_best)
+            best_val = float('inf')
             for pg in optimizer.param_groups:
                 pg['lr'] = args.lr
                 pg['initial_lr'] = args.lr
             print(f"    [WARM-RESTART] Extending Stage 2 from epoch {start_epoch} -> {args.epochs} "
-                  f"(New cosine cycle: peak lr={args.lr:.1e}, warmup={args.warmup_epochs} ep, best val={best_val:.4f})")
+                  f"(New cosine cycle: peak lr={args.lr:.1e}, warmup={args.warmup_epochs} ep, best val reset)")
         else:
             phase_start_epoch = ckpt.get('phase_start_epoch', 0)
             phase_target_epochs = prev_target_epochs
