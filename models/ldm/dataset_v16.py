@@ -84,14 +84,21 @@ class FibroblastPassageDataset(Dataset):
 class MSCPassageDataset(Dataset):
     """
     Dataset for LDM v16 Stage 2: MSC crops (data/processed_v4) with class-calibrated continuous passages.
+    - Split policy (FOV-level, strictly independent of data/processed_v4/test):
+        * 'train' = 7,696 MSC crops from data/processed_v4/train excluding data/raw/val FOVs
+        * 'val'   = 616 MSC crops from data/processed_v4/train belonging to the 20 held-out FOVs in data/raw/val
+        * 'test'  = 645 MSC crops from data/processed_v4/test (blinded; never used in training or checkpoint selection)
     - Preserves ground-truth class boundaries (0% cross-class label contamination) while maintaining
       the continuous intra-class biological age ordering predicted by Classifier v3 (ConvNeXt-Tiny):
-        * Young MSCs (class 0):     mapped monotonically to P[2.0, 6.5]  (Median P3.5)
-        * Senescent MSCs (class 1): mapped monotonically to P[11.5, 20.0] (Median P15.5)
+        * Young MSCs (class 0):     mapped monotonically to P[2.0, 8.5]  (Median P3.5)
+        * Senescent MSCs (class 1): mapped monotonically to P[8.5, 20.0] (Median P14.5)
+      Validation/test passages are calibrated strictly via monotonic interpolation from the 'train' split quantiles.
     - Returns (image [-1, 1] RGB, passage float, cell_type=1 [MSC])
     """
     def __init__(self, root_dir, split='train', data_version='processed_v4',
                  augment=None, passage_jitter=0.20, calibrate_classes=True):
+        if split not in ('train', 'val', 'test'):
+            raise ValueError(f"split must be 'train', 'val', or 'test', got {split}")
         self.root_dir = root_dir
         self.split = split
         self.is_train = (split == 'train')
@@ -99,26 +106,42 @@ class MSCPassageDataset(Dataset):
         self.passage_jitter = passage_jitter if self.is_train else 0.0
         self.calibrate_classes = calibrate_classes
 
-        raw_records = []
-        if self.is_train:
-            cache_path = os.path.join(root_dir, 'data', data_version, 'train_continuous_ages_neutral_masked.pt')
-            if not os.path.exists(cache_path):
-                cache_path = os.path.join(root_dir, 'data', data_version, 'train_continuous_ages.pt')
-            age_cache = torch.load(cache_path, map_location='cpu') if os.path.exists(cache_path) else {}
+        val_raw_dir = os.path.join(root_dir, 'data', 'raw', 'val')
+        val_raw_prefixes = sorted([
+            os.path.splitext(f)[0] for f in os.listdir(val_raw_dir)
+            if f.lower().endswith(('.jpg', '.jpeg', '.png', '.tif', '.tiff'))
+        ]) if os.path.exists(val_raw_dir) else []
 
-            data_dir = os.path.join(root_dir, 'data', data_version, 'train')
-            for cls_idx, (class_name, def_score) in enumerate([('young', 0.0625), ('senescent', 0.3625)]):
-                cdir = os.path.join(data_dir, class_name)
-                if not os.path.exists(cdir):
-                    continue
-                for fname in sorted(os.listdir(cdir)):
-                    if fname.lower().endswith(('.png', '.jpg', '.jpeg')):
-                        abs_p = os.path.join(cdir, fname)
-                        rel_p = os.path.relpath(abs_p, root_dir)
-                        norm_p = rel_p.replace('\\', '/')
-                        s = float(age_cache.get(fname, age_cache.get(rel_p, age_cache.get(norm_p, def_score))))
-                        raw_pas = s * 40.0 + 1.0
-                        raw_records.append((abs_p, fname, raw_pas, cls_idx))
+        cache_path = os.path.join(root_dir, 'data', data_version, 'train_continuous_ages_neutral_masked.pt')
+        if not os.path.exists(cache_path):
+            cache_path = os.path.join(root_dir, 'data', data_version, 'train_continuous_ages.pt')
+        age_cache = torch.load(cache_path, map_location='cpu') if os.path.exists(cache_path) else {}
+
+        # Always collect train_pool first so val/test calibration is fit strictly on train_pool
+        train_pool = []
+        val_pool = []
+        train_data_dir = os.path.join(root_dir, 'data', data_version, 'train')
+        for cls_idx, (class_name, def_score) in enumerate([('young', 0.0625), ('senescent', 0.3625)]):
+            cdir = os.path.join(train_data_dir, class_name)
+            if not os.path.exists(cdir):
+                continue
+            for fname in sorted(os.listdir(cdir)):
+                if fname.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    abs_p = os.path.join(cdir, fname)
+                    rel_p = os.path.relpath(abs_p, root_dir)
+                    norm_p = rel_p.replace('\\', '/')
+                    s = float(age_cache.get(fname, age_cache.get(rel_p, age_cache.get(norm_p, def_score))))
+                    raw_pas = s * 40.0 + 1.0
+                    rec = (abs_p, fname, raw_pas, cls_idx)
+                    if any(fname.startswith(v + '_') for v in val_raw_prefixes):
+                        val_pool.append(rec)
+                    else:
+                        train_pool.append(rec)
+
+        if split == 'train':
+            raw_records = train_pool
+        elif split == 'val':
+            raw_records = val_pool
         else:
             pred_csv_path = os.path.join(root_dir, 'deneme', 'convnext_msc_test_predictions.csv')
             pred_map = {}
@@ -126,9 +149,10 @@ class MSCPassageDataset(Dataset):
                 df_pred = pd.read_csv(pred_csv_path)
                 pred_map = dict(zip(df_pred['filename'], df_pred['predicted_eq_passage']))
 
-            data_dir = os.path.join(root_dir, 'data', data_version, 'test')
-            for cls_idx, (class_name, def_pas) in enumerate([('young', 3.5), ('senescent', 15.5)]):
-                cdir = os.path.join(data_dir, class_name)
+            raw_records = []
+            test_data_dir = os.path.join(root_dir, 'data', data_version, 'test')
+            for cls_idx, (class_name, def_pas) in enumerate([('young', 3.5), ('senescent', 14.5)]):
+                cdir = os.path.join(test_data_dir, class_name)
                 if not os.path.exists(cdir):
                     continue
                 for fname in sorted(os.listdir(cdir)):
@@ -141,15 +165,32 @@ class MSCPassageDataset(Dataset):
         class_labels = np.array([r[3] for r in raw_records], dtype=np.int64)
 
         if self.calibrate_classes and len(raw_records) > 0:
+            # Fit rank calibration strictly on train_pool, then apply to target split
+            tr_raw = np.array([r[2] for r in train_pool], dtype=np.float32)
+            tr_cls = np.array([r[3] for r in train_pool], dtype=np.int64)
+
             cal_passages = np.copy(raw_passages)
-            # Young (cls 0) -> P[2.0, 6.5] centered at median P3.5
-            y_mask = (class_labels == 0)
-            if y_mask.sum() > 1:
-                cal_passages[y_mask] = self._rank_calibrate(raw_passages[y_mask], p_min=2.0, p_med=3.5, p_max=6.5)
-            # Senescent (cls 1) -> P[11.5, 20.0] centered at median P15.5
-            s_mask = (class_labels == 1)
-            if s_mask.sum() > 1:
-                cal_passages[s_mask] = self._rank_calibrate(raw_passages[s_mask], p_min=11.5, p_med=15.5, p_max=20.0)
+            for cls_idx, (p_min, p_med, p_max) in [
+                (0, (2.0, 3.5, 8.5)),
+                (1, (8.5, 14.5, 20.0)),
+            ]:
+                mask_target = (class_labels == cls_idx)
+                mask_tr = (tr_cls == cls_idx)
+                if not np.any(mask_target) or mask_tr.sum() <= 1:
+                    continue
+                tr_vals = tr_raw[mask_tr]
+                tr_cal = self._rank_calibrate(tr_vals, p_min=p_min, p_med=p_med, p_max=p_max)
+                if split == 'train':
+                    cal_passages[mask_target] = tr_cal
+                else:
+                    order = np.argsort(tr_vals, kind='mergesort')
+                    cal_passages[mask_target] = np.interp(
+                        raw_passages[mask_target],
+                        tr_vals[order],
+                        tr_cal[order],
+                        left=p_min,
+                        right=p_max,
+                    ).astype(np.float32)
             self.passages = cal_passages
         else:
             self.passages = raw_passages
@@ -183,21 +224,25 @@ class MSCPassageDataset(Dataset):
     def __len__(self):
         return len(self.samples)
 
-    def make_sampler(self, seed=2026, power=0.5, bin_size=1.0):
+    def make_sampler(self, seed=2026, power=0.0, bin_size=1.0):
         """
-        50/50 Class-Balanced + Intra-Class Passage-Balanced Sampler.
-        Ensures Young and Senescent classes receive equal 50% total weight (preventing outlier bin dominance)
-        while maintaining uniform coverage across passages within each class.
+        50/50 Class-Balanced Sampler.
+        Since _rank_calibrate already distributes cells monotonically across the passage range by empirical quantile,
+        power=0.0 gives exact 50/50 class balance with uniform weight per cell (avoiding boundary bin distortion).
         """
         w = np.zeros(len(self.samples), dtype=np.float64)
         for cls_idx in (0, 1):
             mask = (self.class_labels == cls_idx)
             if not np.any(mask):
                 continue
-            cls_pas = self.passages[mask]
-            binned = np.round(cls_pas / bin_size) * bin_size
-            _, inv, counts = np.unique(binned, return_inverse=True, return_counts=True)
-            cls_w = 1.0 / np.power(counts[inv].astype(np.float64), power)
+            if power <= 0.0:
+                cls_w = np.ones(mask.sum(), dtype=np.float64)
+            else:
+                cls_pas = self.passages[mask]
+                p_min = float(cls_pas.min())
+                binned = np.floor((cls_pas - p_min) / bin_size).astype(np.int64)
+                _, inv, counts = np.unique(binned, return_inverse=True, return_counts=True)
+                cls_w = 1.0 / np.power(counts[inv].astype(np.float64), power)
             cls_w = cls_w / cls_w.sum() * 0.5
             w[mask] = cls_w
         gen = torch.Generator().manual_seed(seed)

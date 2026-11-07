@@ -59,7 +59,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 torch.set_float32_matmul_precision('medium')
 
-MSC_SWEEP_PASSAGES = [3.5, 6.0, 9.0, 12.0, 15.5, 19.0]
+MSC_SWEEP_PASSAGES = [3.5, 6.0, 8.5, 12.0, 15.0, 18.0]
 
 
 def parse_args():
@@ -67,25 +67,25 @@ def parse_args():
     p.add_argument('--exp_name', default='v16_stage2_msc')
     p.add_argument('--base_ckpt', default='best_model_v16_fibroblast_passage.pt',
                    help='Name or path of pre-trained Stage 1 checkpoint in checkpoints/ldm')
-    p.add_argument('--epochs', type=int, default=120,
-                   help='Total Stage 2 epochs (continues from 90 -> 120 with class-calibrated warm-restart)')
+    p.add_argument('--epochs', type=int, default=150,
+                   help='Total Stage 2 epochs (continues from 120 -> 150 with contiguous calibration and no 90-deg rotation)')
     p.add_argument('--warmup_epochs', type=float, default=2.0)
     p.add_argument('--batch_size', type=int, default=4)
     p.add_argument('--accum', type=int, default=4)
-    p.add_argument('--lr', type=float, default=3e-5,
+    p.add_argument('--lr', type=float, default=4e-5,
                    help='Peak learning rate for Stage 2 MSC optimization')
     p.add_argument('--min_lr', type=float, default=1e-6)
     p.add_argument('--weight_decay', type=float, default=1e-2)
     p.add_argument('--lpips_weight', type=float, default=0.1)
     p.add_argument('--cfg_drop', type=float, default=0.10)
-    p.add_argument('--sampler_power', type=float, default=0.5,
-                   help='Intra-class inverse frequency power for 50/50 class-balanced sampling')
+    p.add_argument('--sampler_power', type=float, default=0.0,
+                   help='Intra-class inverse frequency power (0.0 = pure 50/50 class balance with uniform per-cell weight)')
     p.add_argument('--sampler_bin', type=float, default=1.0,
                    help='Passage bin width for intra-class passage sampling')
-    p.add_argument('--val_stride', type=int, default=2, help='use every N-th val image for fast val loss')
+    p.add_argument('--val_stride', type=int, default=1, help='use every N-th val image for fast val loss (1 = full 616-cell val set)')
     p.add_argument('--val_freq', type=int, default=2)
     p.add_argument('--save_interval', type=int, default=15,
-                   help='Save milestone checkpoints every N epochs (e.g., 45, 60, 75, 90, 105, 120)')
+                   help='Save milestone checkpoints every N epochs (e.g., 45, 60, 75, 90, 105, 120, 135, 150)')
     p.add_argument('--num_workers', type=int, default=4)
     p.add_argument('--seed', type=int, default=2026)
     p.add_argument('--smoke', type=int, default=0,
@@ -95,7 +95,7 @@ def parse_args():
 
 @torch.no_grad()
 def run_validation(model, val_loader, device, amp_dtype):
-    """Deterministic val epsilon-MSE on EMA weights across young (P<=6.5), intermediate (6.5<P<14), and senescent (P>=14)."""
+    """Deterministic val epsilon-MSE on EMA weights across young (P<=6.0), intermediate (6.0<P<12.0), and senescent (P>=12.0)."""
     model.unet.eval()
     model.cond.eval()
     sums = {'all': 0.0, 'young': 0.0, 'inter': 0.0, 'senes': 0.0}
@@ -110,9 +110,9 @@ def run_validation(model, val_loader, device, amp_dtype):
             l = l.float().cpu().numpy()
             p = pas.cpu().numpy()
             for g, m in (('all', np.ones_like(p, bool)),
-                         ('young', p <= 6.5),
-                         ('inter', (p > 6.5) & (p < 14.0)),
-                         ('senes', p >= 14.0)):
+                         ('young', p <= 6.0),
+                         ('inter', (p > 6.0) & (p < 12.0)),
+                         ('senes', p >= 12.0)):
                 sums[g] += float(l[m].sum())
                 cnts[g] += int(m.sum())
     return {k: (sums[k] / cnts[k] if cnts[k] else float('nan')) for k in sums}
@@ -133,9 +133,9 @@ def save_sweep(model, val_ds, results_dir, tag, device):
     real_y = val_ds[young_idx][0].unsqueeze(0).to(device)
     real_y_vis = (real_y.clamp(-1, 1) + 1) / 2
     rows_aging = [real_y_vis.cpu()]
-    aging_targets = [6.0, 9.0, 12.0, 15.5, 19.0]
+    aging_targets = [6.0, 8.5, 12.0, 15.0, 18.0]
     for tp in aging_targets:
-        out = model.translate(real_y, tp, cell_type=CELL_MSC, strength=0.75, guidance_scale=4.0, num_steps=50)
+        out = model.translate(real_y, tp, cell_type=CELL_MSC, strength=0.65, guidance_scale=3.5, num_steps=50)
         rows_aging.append(out.cpu())
     save_image(torch.cat(rows_aging, 0), os.path.join(results_dir, f'{tag}_sdedit_aging.png'), nrow=len(rows_aging))
 
@@ -144,7 +144,7 @@ def save_sweep(model, val_ds, results_dir, tag, device):
     real_s = val_ds[senes_idx][0].unsqueeze(0).to(device)
     real_s_vis = (real_s.clamp(-1, 1) + 1) / 2
     rows_rejuv = [real_s_vis.cpu()]
-    rejuv_targets = [15.5, 12.0, 9.0, 6.0, 3.5]
+    rejuv_targets = [15.0, 12.0, 8.5, 6.0, 3.5]
     for tp in rejuv_targets:
         out = model.translate(real_s, tp, cell_type=CELL_MSC, strength=0.65, guidance_scale=3.5, num_steps=50)
         rows_rejuv.append(out.cpu())
@@ -373,7 +373,11 @@ def main():
                   f"lr {cur_lr:.2e} | best {best_val:.4f}{' *BEST*' if is_best else ''} | {ep_time:.1f}s", flush=True)
 
             if is_best:
-                torch.save(model.state_dicts(), best_path)
+                torch.save({
+                    'epoch': epoch,
+                    'best_val_loss': best_val,
+                    **model.state_dicts(),
+                }, best_path)
 
             if (epoch % (args.val_freq * 2) == 0) or (epoch == args.epochs):
                 save_sweep(model, val_ds, RESULTS_DIR, f'epoch_{epoch:02d}', DEVICE)

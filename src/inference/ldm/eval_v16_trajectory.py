@@ -2,14 +2,22 @@
 Continuous 5-Step Passage Trajectory Evaluation (LDM v16 Stage 2 MSC)
 ======================================================================
 Evaluates gradual passage translation across 5 steps using LDM v16 Stage 2
-canonical Low-FID parameters with fixed latent noise.
+with optional Progressive Parameter Scaling (gentle start -> canonical Low-FID endpoint)
+and class-calibrated baseline input passages.
 
 Trajectory Modes (--traj_mode):
-  - proportional (default): Linearly interpolates each cell from its initial passage P_in
+  - proportional (default): Linearly interpolates each cell from its baseline passage P_in
     to the biological target endpoint (P=3.5 for Rejuvenation, P=15.5 for Aging)
     in 5 equal steps (20%, 40%, 60%, 80%, 100%). Guarantees 100% of cells reach
     the target biological passage at Step 5.
   - fixed_delta: Subtracts or adds a fixed passage delta (-1.0 or +1.0 P) per step.
+
+Progressive Parameter Scaling (--progressive, default True):
+  - Early steps apply lighter noise strength and gentle CFG to smoothly initiate morphological
+    change without disrupting cellular realism or spiking FID.
+  - By Step 5 (100% target endpoint), parameters reach canonical Low-FID values:
+      * Rejuvenation: Strength = 0.65, CFG = 3.5
+      * Aging:        Strength = 0.75, CFG = 4.0
 
 Metrics computed per step:
   1. ConvNeXt-Tiny classifier v3: Mean / Median predicted passage & Delta P.
@@ -60,8 +68,22 @@ IMNET_STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to(dev)
 
 
 # =========================================================================
-# Classifiers
+# Classifiers & Calibration Helpers
 # =========================================================================
+def rank_calibrate(vals, p_min, p_med, p_max):
+    """Maps continuous scores monotonically by empirical quantile onto [p_min, p_max] with exact median p_med."""
+    n = len(vals)
+    order = np.argsort(vals, kind='mergesort')
+    ranks = np.empty(n, dtype=np.float32)
+    ranks[order] = np.linspace(0.0, 1.0, n, dtype=np.float32)
+    out = np.where(
+        ranks <= 0.5,
+        p_min + (ranks / 0.5) * (p_med - p_min),
+        p_med + ((ranks - 0.5) / 0.5) * (p_max - p_med)
+    )
+    return out.astype(np.float32)
+
+
 class ConvNeXtMultiTask(nn.Module):
     def __init__(self):
         super().__init__()
@@ -142,11 +164,9 @@ def run_trajectory(direction, args):
     if getattr(args, 'out_dir', None):
         out_base = os.path.join(args.out_dir, dir_name)
     else:
-        out_base = os.path.join(root_dir, 'results', 'v16_stage2_evaluation', dir_name)
+        out_base = os.path.join(root_dir, 'results', 'v16_stage2_evaluation', 'epoch_120_progressive', dir_name)
     os.makedirs(out_base, exist_ok=True)
 
-    strength = args.rejuv_strength if is_rejuv else args.aging_strength
-    cfg = args.rejuv_cfg if is_rejuv else args.aging_cfg
     step_sign = -1.0 if is_rejuv else +1.0
     clamp_val = args.min_passage if is_rejuv else args.max_passage
 
@@ -157,6 +177,11 @@ def run_trajectory(direction, args):
     ref_dir = y_test_dir if is_rejuv else s_test_dir
 
     in_files = sorted([os.path.join(in_dir, f) for f in os.listdir(in_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
+    if args.match_v12_cohort:
+        # Same evaluation cohort as v12/v14/v15 benchmarks (Aging N=327, Rejuvenation N=315)
+        mask_npy = os.path.join(root_dir, 'scratch', 'mrcnn_masks_input_senescent.npy' if is_rejuv else 'mrcnn_masks_input_young.npy')
+        mrcnn_masks = np.load(mask_npy, allow_pickle=True).item()
+        in_files = [f for f in in_files if os.path.basename(f) in mrcnn_masks and mrcnn_masks[os.path.basename(f)].sum() > 0]
     if not args.all and args.n_samples is not None:
         in_files = in_files[:args.n_samples]
 
@@ -169,12 +194,38 @@ def run_trajectory(direction, args):
         os.makedirs(sd, exist_ok=True)
         step_dirs[s] = sd
 
+    # Step-specific progressive parameters
+    step_params = {}
+    for s in range(1, args.n_steps + 1):
+        if args.progressive:
+            prog = (s - 1) / max(1, args.n_steps - 1)  # 0.0 at s=1, 1.0 at s=5
+            s_start = args.rejuv_start_strength if is_rejuv else args.aging_start_strength
+            s_end = args.rejuv_strength if is_rejuv else args.aging_strength
+            step_s = s_start + prog * (s_end - s_start)
+
+            c_start = args.rejuv_start_cfg if is_rejuv else args.aging_start_cfg
+            c_end = args.rejuv_cfg if is_rejuv else args.aging_cfg
+            step_c = c_start + prog * (c_end - c_start)
+        else:
+            step_s = args.rejuv_strength if is_rejuv else args.aging_strength
+            step_c = args.rejuv_cfg if is_rejuv else args.aging_cfg
+        step_params[s] = (step_s, step_c)
+
     print(f"\n{'='*75}")
     print(f"   STARTING 5-STEP {direction.upper()} TRAJECTORY (N = {n_total} Cells)")
     if args.traj_mode == 'proportional':
-        print(f"   Mode: Proportional (20% -> 100%) | Strength: {strength} | CFG: {cfg} | Endpoint Target: P{clamp_val}")
+        print(f"   Mode: Proportional (20% -> 100%) | Endpoint Target: P{clamp_val}")
     else:
-        print(f"   Mode: Fixed Delta ({step_sign * args.delta_step:+.1f} P/step) | Strength: {strength} | CFG: {cfg} | Clamp: P{clamp_val}")
+        print(f"   Mode: Fixed Delta ({step_sign * args.delta_step:+.1f} P/step) | Clamp: P{clamp_val}")
+
+    if args.progressive:
+        print("   Progressive Parameter Scaling (Gentle Start -> Low-FID Final Endpoint):")
+        for s in range(1, args.n_steps + 1):
+            s_val, c_val = step_params[s]
+            print(f"     Step {s}: Strength = {s_val:.3f} | CFG = {c_val:.2f}")
+    else:
+        fix_s, fix_c = step_params[1]
+        print(f"   Fixed Parameters: Strength = {fix_s:.2f} | CFG = {fix_c:.2f}")
     print(f"   Output: {out_base}")
     print(f"{'='*75}\n", flush=True)
 
@@ -187,7 +238,18 @@ def run_trajectory(direction, args):
         chunk = torch.stack(real_input_tensors[i:i + 32])
         real_p_list.extend(predict_passages(cls_convnext, chunk).tolist())
     real_passages = np.array(real_p_list)
-    print(f"[OK] Baseline passage: Mean P{real_passages.mean():.2f} +/- {real_passages.std():.2f} (Median: P{np.median(real_passages):.2f})", flush=True)
+    print(f"[OK] Raw baseline passage: Mean P{real_passages.mean():.2f} +/- {real_passages.std():.2f} (Median: P{np.median(real_passages):.2f})", flush=True)
+
+    if args.calibrate_input:
+        if is_rejuv:
+            # Senescent test input -> calibrated to [8.5, 20.0], median 14.5 (contiguous with Young)
+            input_passages = rank_calibrate(real_passages, p_min=8.5, p_med=14.5, p_max=20.0)
+        else:
+            # Young test input -> calibrated to [2.0, 8.5], median 3.5
+            input_passages = rank_calibrate(real_passages, p_min=2.0, p_med=3.5, p_max=8.5)
+        print(f"[OK] Calibrated baseline passage: Mean P{input_passages.mean():.2f} +/- {input_passages.std():.2f} (Median: P{np.median(input_passages):.2f})", flush=True)
+    else:
+        input_passages = real_passages
 
     del cls_convnext
     if torch.cuda.is_available():
@@ -214,10 +276,17 @@ def run_trajectory(direction, args):
         montage_exemplars = []
         t_start = time.time()
 
+        # Seed once per direction (identical to v12 sweep: set_seed(2026) before each direction)
+        torch.manual_seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(args.seed)
+            torch.cuda.manual_seed_all(args.seed)
+        np.random.seed(args.seed)
+
         for b_idx in range(n_batches):
             b_slice = slice(b_idx * bs, min((b_idx + 1) * bs, n_total))
             b_paths = in_files[b_slice]
-            b_p_in = real_passages[b_slice]
+            b_p_in = input_passages[b_slice]
             b_tensors = torch.stack(real_input_tensors[b_slice])
             current_bs = len(b_paths)
 
@@ -238,9 +307,10 @@ def run_trajectory(direction, args):
                 continue
 
             bx = (b_tensors * 2.0 - 1.0).to(dev)
-            with torch.no_grad():
+            # Same protocol as v12 sweep (sweep_ldm_100steps_seed2026.py): bf16 autocast,
+            # seed set once per direction, noise drawn sequentially (encode sample -> randn_like).
+            with torch.no_grad(), torch.amp.autocast('cuda', dtype=torch.bfloat16, enabled=(dev == 'cuda')):
                 latents = model.encode(bx)
-                torch.manual_seed(args.seed + b_idx)
                 fixed_noise = torch.randn_like(latents)
                 batch_row_imgs = [b_tensors]
 
@@ -256,10 +326,12 @@ def run_trajectory(direction, args):
                             target_p = np.minimum(clamp_val, b_p_in + (s * args.delta_step))
                     target_p_tensor = torch.tensor(target_p, dtype=torch.float32, device=dev)
 
+                    step_strength, step_cfg = step_params[s]
+
                     out = model.translate(bx, target_passage=target_p_tensor, cell_type=CELL_MSC,
-                                          strength=strength, guidance_scale=cfg,
-                                          num_steps=50, use_ema=True, noise=fixed_noise)
-                    out_cpu = out.cpu()
+                                          strength=step_strength, guidance_scale=step_cfg,
+                                          num_steps=args.ddim_steps, use_ema=True, noise=fixed_noise)
+                    out_cpu = out.float().cpu()
 
                     for k, img_t in enumerate(out_cpu):
                         fname = os.path.basename(b_paths[k])
@@ -320,35 +392,33 @@ def run_trajectory(direction, args):
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    # 4. Official Dual-FID calculation (Target Convergence FID + All-MSC Realism FID)
-    print("\n[*] Calculating official FID scores (Target Class & All-MSC Realism)...", flush=True)
-    step_fids = {}
-    step_realism_fids = {}
+    # 4. Official Dual-Class FID calculation (Young vs Senescent)
+    print("\n[*] Calculating official Dual-Class FID scores (vs Young and vs Senescent)...", flush=True)
+    step_fids_young = {}
+    step_fids_senes = {}
     try:
         block_idx = fid_score.InceptionV3.BLOCK_INDEX_BY_DIM[2048]
         inc_model = fid_score.InceptionV3([block_idx]).to(dev).eval()
-        ref_files = sorted([os.path.join(ref_dir, f) for f in os.listdir(ref_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
-        all_real_files = sorted(
-            [os.path.join(y_test_dir, f) for f in os.listdir(y_test_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))] +
-            [os.path.join(s_test_dir, f) for f in os.listdir(s_test_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-        )
-        mu_ref, sig_ref = fid_score.calculate_activation_statistics(ref_files, inc_model, batch_size=32, dims=2048, device=dev, num_workers=0)
-        mu_all, sig_all = fid_score.calculate_activation_statistics(all_real_files, inc_model, batch_size=32, dims=2048, device=dev, num_workers=0)
+        young_files = sorted([os.path.join(y_test_dir, f) for f in os.listdir(y_test_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
+        senes_files = sorted([os.path.join(s_test_dir, f) for f in os.listdir(s_test_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
+        mu_young, sig_young = fid_score.calculate_activation_statistics(young_files, inc_model, batch_size=32, dims=2048, device=dev, num_workers=0)
+        mu_senes, sig_senes = fid_score.calculate_activation_statistics(senes_files, inc_model, batch_size=32, dims=2048, device=dev, num_workers=0)
 
         for s in range(args.n_steps + 1):
             cur_files = in_files if s == 0 else [os.path.join(step_dirs[s], fn) for fn in all_filenames]
             mu_s, sig_s = fid_score.calculate_activation_statistics(cur_files, inc_model, batch_size=32, dims=2048, device=dev, num_workers=0)
-            step_fids[s] = float(fid_score.calculate_frechet_distance(mu_s, sig_s, mu_ref, sig_ref))
-            step_realism_fids[s] = float(fid_score.calculate_frechet_distance(mu_s, sig_s, mu_all, sig_all))
-            print(f"  -> Step {s} | Target FID: {step_fids[s]:.2f} | Realism FID (All-MSC): {step_realism_fids[s]:.2f}", flush=True)
+            step_fids_young[s] = float(fid_score.calculate_frechet_distance(mu_s, sig_s, mu_young, sig_young))
+            step_fids_senes[s] = float(fid_score.calculate_frechet_distance(mu_s, sig_s, mu_senes, sig_senes))
+            target_fid = step_fids_young[s] if is_rejuv else step_fids_senes[s]
+            print(f"  -> Step {s} | Target FID: {target_fid:.2f} | FID vs Young: {step_fids_young[s]:.2f} | FID vs Senes: {step_fids_senes[s]:.2f}", flush=True)
         del inc_model
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
     except Exception as e:
         print(f"  [!] FID calculation error: {e}")
         for s in range(args.n_steps + 1):
-            step_fids.setdefault(s, -1.0)
-            step_realism_fids.setdefault(s, -1.0)
+            step_fids_young.setdefault(s, -1.0)
+            step_fids_senes.setdefault(s, -1.0)
 
     # 5. Summary CSV
     real_p = step_preds_convnext[0]
@@ -374,6 +444,8 @@ def run_trajectory(direction, args):
         target_conf_pct = float(np.mean(r_conf) * 100.0)
         bright_shift = float(np.mean(b_arr - step_brightness[0])) if s > 0 else 0.0
 
+        step_s_val, step_c_val = step_params.get(s, (0.0, 0.0))
+
         if s == 0:
             label = f"Step 0 (Real {'Senescent' if is_rejuv else 'Young'})"
         elif args.traj_mode == 'proportional':
@@ -382,11 +454,15 @@ def run_trajectory(direction, args):
         else:
             label = f"Step {s} (Target P {step_sign * s * args.delta_step:+.1f})"
 
+        target_fid = step_fids_young[s] if is_rejuv else step_fids_senes[s]
         summary_rows.append({
             'Step': s,
             'Label': label,
-            'FID': round(step_fids[s], 2) if step_fids[s] > 0 else 'N/A',
-            'FID_Realism': round(step_realism_fids[s], 2) if step_realism_fids[s] > 0 else 'N/A',
+            'Strength': round(step_s_val, 3) if s > 0 else 0.0,
+            'CFG': round(step_c_val, 2) if s > 0 else 0.0,
+            'FID_Target': round(target_fid, 2) if target_fid > 0 else 'N/A',
+            'FID_vs_Young': round(step_fids_young[s], 2) if step_fids_young[s] > 0 else 'N/A',
+            'FID_vs_Senescent': round(step_fids_senes[s], 2) if step_fids_senes[s] > 0 else 'N/A',
             'ConvNeXt_Passage_Mean': round(float(np.mean(p_arr)), 2),
             'ConvNeXt_Passage_Median': round(float(np.median(p_arr)), 2),
             'Delta_Passage': round(delta_p, 2),
@@ -405,7 +481,11 @@ def run_trajectory(direction, args):
 
     # Per-sample CSV
     conf_key = 'young_conf' if is_rejuv else 'senescent_conf'
-    sample_dict = {'filename': all_filenames, 'real_passage': np.round(real_p, 2)}
+    sample_dict = {
+        'filename': all_filenames,
+        'raw_passage': np.round(real_p, 2),
+        'calibrated_passage': np.round(input_passages, 2)
+    }
     for s in range(1, args.n_steps + 1):
         sample_dict[f'step{s}_passage'] = np.round(step_preds_convnext[s], 2)
         sample_dict[f'step{s}_{conf_key}'] = np.round(step_preds_resnet_target_conf[s], 3)
@@ -427,7 +507,14 @@ def run_trajectory(direction, args):
     fig, axes = plt.subplots(1, 3, figsize=(18, 5), dpi=300)
     steps = list(range(args.n_steps + 1))
     if args.traj_mode == 'proportional':
-        step_labels = ['Real\n(P_in)'] + [f'S{s}\n({int(round(s / args.n_steps * 100))}%)' for s in range(1, args.n_steps + 1)]
+        step_labels = ['Real\n(P_in)']
+        for s in range(1, args.n_steps + 1):
+            pct = int(round(s / args.n_steps * 100))
+            if args.progressive:
+                s_val, _ = step_params[s]
+                step_labels.append(f'S{s} ({pct}%)\ns={s_val:.2f}')
+            else:
+                step_labels.append(f'S{s}\n({pct}%)')
     else:
         step_labels = ['Real\n(P_in)'] + [f'S{s}\n(P{step_sign * s * args.delta_step:+.0f})' for s in range(1, args.n_steps + 1)]
 
@@ -461,17 +548,16 @@ def run_trajectory(direction, args):
     ax.grid(True, linestyle=':', alpha=0.6)
     ax.legend(frameon=True, fontsize=10)
 
-    # 3. FID
+    # 3. Dual-Class FID Convergence
     ax = axes[2]
-    fids = [f if isinstance(f, (int, float)) and f > 0 else np.nan for f in df_summary['FID'].values]
-    fids_real = [f if isinstance(f, (int, float)) and f > 0 else np.nan for f in df_summary['FID_Realism'].values]
-    c_fid = '#d62728' if is_rejuv else '#9467bd'
-    ax.plot(steps, fids, 'o-', color=c_fid, linewidth=2.5, markersize=8, label=f"Target FID (vs {'Young' if is_rejuv else 'Senescent'})")
-    ax.plot(steps, fids_real, 's--', color='#2b5c8f', linewidth=2.0, markersize=7, label='Realism FID (vs All Real MSCs)')
+    fids_young = [f if isinstance(f, (int, float)) and f > 0 else np.nan for f in df_summary['FID_vs_Young'].values]
+    fids_senes = [f if isinstance(f, (int, float)) and f > 0 else np.nan for f in df_summary['FID_vs_Senescent'].values]
+    ax.plot(steps, fids_young, 'o-', color='#1f77b4', linewidth=2.5, markersize=8, label='FID vs Young')
+    ax.plot(steps, fids_senes, 's--', color='#d62728', linewidth=2.5, markersize=8, label='FID vs Senescent')
     ax.set_xticks(steps)
     ax.set_xticklabels(step_labels, fontsize=10)
     ax.set_ylabel('FID (Lower is Better)', fontsize=12, fontweight='bold')
-    ax.set_title('Distributional Convergence & Realism (FID)', fontsize=13, fontweight='bold')
+    ax.set_title('Dual-Class Morphological FID Convergence', fontsize=13, fontweight='bold')
     ax.grid(True, linestyle=':', alpha=0.6)
     ax.legend(frameon=True, fontsize=10)
 
@@ -489,24 +575,39 @@ def main():
     p.add_argument('--ckpt', default='best_model_v16_stage2_msc.pt',
                    help='Checkpoint filename in checkpoints/ldm or absolute path')
     p.add_argument('--out_dir', default=None,
-                   help='Custom root directory for outputs (defaults to results/v16_stage2_evaluation)')
+                   help='Custom root directory for outputs (defaults to results/v16_stage2_evaluation/epoch_120_progressive)')
     p.add_argument('--all', action='store_true', default=False,
                    help='Process full test cohort (Senescent N=318, Young N=327)')
     p.add_argument('--n_samples', type=int, default=None,
                    help='Subset number of crops if specified')
     p.add_argument('--batch_size', type=int, default=8, help='Diffusion batch size')
     p.add_argument('--seed', type=int, default=2026)
-    p.add_argument('--rejuv_strength', type=float, default=0.65)
-    p.add_argument('--rejuv_cfg', type=float, default=3.5)
-    p.add_argument('--aging_strength', type=float, default=0.75)
-    p.add_argument('--aging_cfg', type=float, default=4.0)
+    p.add_argument('--rejuv_strength', type=float, default=0.65, help='Canonical Low-FID final strength for rejuvenation')
+    p.add_argument('--rejuv_cfg', type=float, default=3.5, help='Canonical Low-FID final CFG for rejuvenation')
+    p.add_argument('--aging_strength', type=float, default=0.65, help='Canonical Low-FID final strength for aging (matched to rejuvenation)')
+    p.add_argument('--aging_cfg', type=float, default=3.5, help='Canonical Low-FID final CFG for aging (matched to rejuvenation)')
+    p.add_argument('--rejuv_start_strength', type=float, default=0.35, help='Initial strength for rejuvenation Step 1')
+    p.add_argument('--aging_start_strength', type=float, default=0.35, help='Initial strength for aging Step 1')
+    p.add_argument('--rejuv_start_cfg', type=float, default=2.0, help='Initial CFG for rejuvenation Step 1')
+    p.add_argument('--aging_start_cfg', type=float, default=2.0, help='Initial CFG for aging Step 1')
+    p.add_argument('--no_progressive', dest='progressive', action='store_false',
+                   help='Disable progressive parameter scaling (use fixed final parameters across all steps)')
+    p.set_defaults(progressive=True)
+    p.add_argument('--no_calibrate_input', dest='calibrate_input', action='store_false',
+                   help='Disable baseline passage calibration (use raw ConvNeXt predictions directly)')
+    p.set_defaults(calibrate_input=True)
     p.add_argument('--traj_mode', choices=['proportional', 'fixed_delta'], default='proportional',
                    help='Proportional (20%..100% interpolation to endpoint) or fixed_delta per step')
+    p.add_argument('--ddim_steps', type=int, default=100,
+                   help='DDIM sampling steps (100 to match the v12/v14/v15 benchmark protocol)')
+    p.add_argument('--match_v12_cohort', dest='match_v12_cohort', action='store_true',
+                   help='Restrict inputs to the v12 benchmark cohort (Aging N=327, Rejuvenation N=315)')
+    p.set_defaults(match_v12_cohort=False)
     p.add_argument('--n_steps', type=int, default=5, help='Number of gradual trajectory steps')
     p.add_argument('--delta_step', type=float, default=1.0,
                    help='Passage delta per step (used when traj_mode=fixed_delta)')
     p.add_argument('--min_passage', type=float, default=3.5, help='Biological young median clamp')
-    p.add_argument('--max_passage', type=float, default=15.5, help='Biological senescent mean clamp')
+    p.add_argument('--max_passage', type=float, default=14.5, help='Biological senescent median clamp')
     p.add_argument('--skip_generation', action='store_true',
                    help='Skip generation if images already exist and re-run evaluation only')
     args = p.parse_args()
