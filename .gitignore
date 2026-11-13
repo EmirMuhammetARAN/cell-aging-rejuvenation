@@ -134,3 +134,7 @@ Yeni Metin Belgesi.txt
 bioRxiv.md
 .antigravityrules
 Supplementary_Information.md
+
+# Local Legacy Archives (kept on disk, excluded from Git)
+archive/
+**/archive/

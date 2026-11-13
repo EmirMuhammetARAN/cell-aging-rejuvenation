@@ -239,12 +239,12 @@ class CellLDM_v16(nn.Module):
 
     @torch.no_grad()
     def translate(self, images, target_passage, cell_type=None, strength=0.6, num_steps=50,
-                  use_ema=True, guidance_scale=3.0, noise=None):
+                  use_ema=True, guidance_scale=3.0, noise=None, latents=None):
         """SDEdit-style passage translation of real images to `target_passage`. Returns [0,1]."""
         unet, cond_net = self._nets(use_ema)
         unet.eval(); cond_net.eval()
-        device = images.device
-        B = images.shape[0]
+        device = images.device if images is not None else latents.device
+        B = images.shape[0] if images is not None else latents.shape[0]
         target_passage = torch.as_tensor(target_passage, dtype=torch.float32, device=device).reshape(-1)
         if target_passage.numel() == 1 and B > 1:
             target_passage = target_passage.expand(B).clone()
@@ -255,7 +255,8 @@ class CellLDM_v16(nn.Module):
             if cell_type.numel() == 1 and B > 1:
                 cell_type = cell_type.expand(B).clone()
 
-        latents = self.encode(images)
+        if latents is None:
+            latents = self.encode(images)
         self.inference_scheduler.set_timesteps(num_steps)
         timesteps = self.inference_scheduler.timesteps
         start = int(len(timesteps) * (1 - strength))

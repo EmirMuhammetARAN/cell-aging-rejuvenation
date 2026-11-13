@@ -241,13 +241,33 @@ def run_trajectory(direction, args):
     print(f"[OK] Raw baseline passage: Mean P{real_passages.mean():.2f} +/- {real_passages.std():.2f} (Median: P{np.median(real_passages):.2f})", flush=True)
 
     if args.calibrate_input:
-        if is_rejuv:
-            # Senescent test input -> calibrated to [8.5, 20.0], median 14.5 (contiguous with Young)
-            input_passages = rank_calibrate(real_passages, p_min=8.5, p_med=14.5, p_max=20.0)
-        else:
-            # Young test input -> calibrated to [2.0, 8.5], median 3.5
-            input_passages = rank_calibrate(real_passages, p_min=2.0, p_med=3.5, p_max=8.5)
-        print(f"[OK] Calibrated baseline passage: Mean P{input_passages.mean():.2f} +/- {input_passages.std():.2f} (Median: P{np.median(input_passages):.2f})", flush=True)
+        # Calibrate strictly via monotonic interpolation from the 'train' split empirical quantiles (no test leakage)
+        val_raw_dir = os.path.join(root_dir, 'data', 'raw', 'val')
+        val_raw_prefixes = sorted([
+            os.path.splitext(f)[0] for f in os.listdir(val_raw_dir)
+            if f.lower().endswith(('.jpg', '.jpeg', '.png', '.tif', '.tiff'))
+        ]) if os.path.exists(val_raw_dir) else []
+        cache_path = os.path.join(root_dir, 'data', 'processed_v4', 'train_continuous_ages_neutral_masked.pt')
+        age_cache = torch.load(cache_path, map_location='cpu') if os.path.exists(cache_path) else {}
+        cls_name = 'senescent' if is_rejuv else 'young'
+        def_s = 0.3625 if is_rejuv else 0.0625
+        tr_cdir = os.path.join(root_dir, 'data', 'processed_v4', 'train', cls_name)
+        tr_vals = []
+        for fn in sorted(os.listdir(tr_cdir)):
+            if fn.lower().endswith(('.png', '.jpg', '.jpeg')) and not any(fn.startswith(v + '_') for v in val_raw_prefixes):
+                abs_p = os.path.join(tr_cdir, fn)
+                rel_p = os.path.relpath(abs_p, root_dir)
+                norm_p = rel_p.replace('\\', '/')
+                s_val = float(age_cache.get(fn, age_cache.get(rel_p, age_cache.get(norm_p, def_s))))
+                tr_vals.append(s_val * 40.0 + 1.0)
+        tr_vals = np.array(tr_vals, dtype=np.float32)
+        p_min, p_med, p_max = (8.5, 14.5, 20.0) if is_rejuv else (2.0, 3.5, 8.5)
+        tr_cal = rank_calibrate(tr_vals, p_min=p_min, p_med=p_med, p_max=p_max)
+        order = np.argsort(tr_vals, kind='mergesort')
+        input_passages = np.interp(
+            real_passages, tr_vals[order], tr_cal[order], left=p_min, right=p_max
+        ).astype(np.float32)
+        print(f"[OK] Train-quantile calibrated baseline passage: Mean P{input_passages.mean():.2f} +/- {input_passages.std():.2f} (Median: P{np.median(input_passages):.2f})", flush=True)
     else:
         input_passages = real_passages
 
@@ -255,8 +275,36 @@ def run_trajectory(direction, args):
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
+    ckpt_path = args.ckpt if os.path.isabs(args.ckpt) else os.path.join(root_dir, 'checkpoints', 'ldm', args.ckpt)
+    import hashlib, json
+    ckpt_sha256 = hashlib.sha256(open(ckpt_path, 'rb').read()).hexdigest() if os.path.exists(ckpt_path) else None
+    ckpt_meta = torch.load(ckpt_path, map_location='cpu') if os.path.exists(ckpt_path) else {}
+    manifest_data = {
+        'direction': direction,
+        'ckpt_path': os.path.abspath(ckpt_path),
+        'ckpt_filename': os.path.basename(ckpt_path),
+        'ckpt_sha256': ckpt_sha256,
+        'ckpt_epoch': ckpt_meta.get('epoch'),
+        'ckpt_best_val_loss': ckpt_meta.get('best_val_loss'),
+        'ckpt_ema_steps': ckpt_meta.get('ema_steps'),
+        'seed': args.seed,
+        'batch_size': args.batch_size,
+        'ddim_steps': args.ddim_steps,
+        'precision': args.precision,
+        'traj_mode': args.traj_mode,
+        'progressive': args.progressive,
+        'fixed_passage_control': args.fixed_passage_control,
+        'min_passage': args.min_passage,
+        'max_passage': args.max_passage,
+        'step_params': {str(k): {'strength': float(v[0]), 'cfg': float(v[1])} for k, v in step_params.items()},
+        'n_total': n_total,
+    }
+    with open(os.path.join(out_base, 'manifest.json'), 'w', encoding='utf-8') as mf:
+        json.dump(manifest_data, mf, indent=2)
+
     # 2. Diffusion generation (or skip if existing)
     if args.skip_generation:
+        del ckpt_meta
         print("[*] --skip_generation specified. Using existing images in gen_step1..5.", flush=True)
         montage_exemplars = []
         for fn in all_filenames[:10]:
@@ -265,18 +313,23 @@ def run_trajectory(direction, args):
                 row.append(TF.to_tensor(Image.open(os.path.join(step_dirs[s], fn)).convert('RGB')))
             montage_exemplars.append(row)
     else:
-        ckpt_path = args.ckpt if os.path.isabs(args.ckpt) else os.path.join(root_dir, 'checkpoints', 'ldm', args.ckpt)
-        print(f"[*] Loading LDM v16 Checkpoint: {ckpt_path}", flush=True)
+        print(f"[*] Loading LDM v16 Checkpoint: {ckpt_path} (epoch={ckpt_meta.get('epoch')}, sha256={ckpt_sha256[:12]}...)", flush=True)
         model = CellLDM_v16().to(dev)
-        model.load_state_dicts(torch.load(ckpt_path, map_location='cpu'))
+        model.load_state_dicts(ckpt_meta)
+        del ckpt_meta
         model.eval()
+
+        use_bf16 = (args.precision == 'bf16' and dev == 'cuda')
+        if args.precision == 'fp32':
+            torch.backends.cudnn.benchmark = False
+            torch.backends.cudnn.deterministic = True
 
         bs = args.batch_size
         n_batches = (n_total + bs - 1) // bs
         montage_exemplars = []
         t_start = time.time()
 
-        # Seed once per direction (identical to v12 sweep: set_seed(2026) before each direction)
+        # Seed once per direction (identical to v12 sweep: set_seed before each direction)
         torch.manual_seed(args.seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed(args.seed)
@@ -307,15 +360,14 @@ def run_trajectory(direction, args):
                 continue
 
             bx = (b_tensors * 2.0 - 1.0).to(dev)
-            # Same protocol as v12 sweep (sweep_ldm_100steps_seed2026.py): bf16 autocast,
-            # seed set once per direction, noise drawn sequentially (encode sample -> randn_like).
-            with torch.no_grad(), torch.amp.autocast('cuda', dtype=torch.bfloat16, enabled=(dev == 'cuda')):
+            # Identical RNG consumption per batch as V12: 1 encode sample + 1 randn_like(latents), passed via latents=latents
+            with torch.no_grad(), torch.amp.autocast('cuda', dtype=torch.bfloat16, enabled=use_bf16):
                 latents = model.encode(bx)
                 fixed_noise = torch.randn_like(latents)
                 batch_row_imgs = [b_tensors]
 
                 for s in range(1, args.n_steps + 1):
-                    frac = float(s) / float(args.n_steps)
+                    frac = 1.0 if args.fixed_passage_control else (float(s) / float(args.n_steps))
                     if args.traj_mode == 'proportional':
                         start_p = np.maximum(clamp_val, b_p_in) if is_rejuv else np.minimum(clamp_val, b_p_in)
                         target_p = start_p + frac * (clamp_val - start_p)
@@ -330,7 +382,8 @@ def run_trajectory(direction, args):
 
                     out = model.translate(bx, target_passage=target_p_tensor, cell_type=CELL_MSC,
                                           strength=step_strength, guidance_scale=step_cfg,
-                                          num_steps=args.ddim_steps, use_ema=True, noise=fixed_noise)
+                                          num_steps=args.ddim_steps, use_ema=True, noise=fixed_noise,
+                                          latents=latents)
                     out_cpu = out.float().cpu()
 
                     for k, img_t in enumerate(out_cpu):
@@ -584,8 +637,8 @@ def main():
     p.add_argument('--seed', type=int, default=2026)
     p.add_argument('--rejuv_strength', type=float, default=0.65, help='Canonical Low-FID final strength for rejuvenation')
     p.add_argument('--rejuv_cfg', type=float, default=3.5, help='Canonical Low-FID final CFG for rejuvenation')
-    p.add_argument('--aging_strength', type=float, default=0.65, help='Canonical Low-FID final strength for aging (matched to rejuvenation)')
-    p.add_argument('--aging_cfg', type=float, default=3.5, help='Canonical Low-FID final CFG for aging (matched to rejuvenation)')
+    p.add_argument('--aging_strength', type=float, default=0.75, help='Canonical Low-FID final strength for aging (matched to V12)')
+    p.add_argument('--aging_cfg', type=float, default=4.0, help='Canonical Low-FID final CFG for aging (matched to V12)')
     p.add_argument('--rejuv_start_strength', type=float, default=0.35, help='Initial strength for rejuvenation Step 1')
     p.add_argument('--aging_start_strength', type=float, default=0.35, help='Initial strength for aging Step 1')
     p.add_argument('--rejuv_start_cfg', type=float, default=2.0, help='Initial CFG for rejuvenation Step 1')
@@ -593,6 +646,10 @@ def main():
     p.add_argument('--no_progressive', dest='progressive', action='store_false',
                    help='Disable progressive parameter scaling (use fixed final parameters across all steps)')
     p.set_defaults(progressive=True)
+    p.add_argument('--fixed_passage_control', action='store_true', default=False,
+                   help='Ablation control: hold target passage fixed at endpoint while scaling strength/CFG')
+    p.add_argument('--precision', choices=['fp32', 'bf16'], default='fp32',
+                   help='Inference precision (fp32 deterministic to match V12 seed sweep)')
     p.add_argument('--no_calibrate_input', dest='calibrate_input', action='store_false',
                    help='Disable baseline passage calibration (use raw ConvNeXt predictions directly)')
     p.set_defaults(calibrate_input=True)
