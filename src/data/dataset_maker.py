@@ -5,11 +5,19 @@ from torch.utils.data import Dataset
 from PIL import Image
 
 class DatasetMaker(Dataset):
+    """Unpaired young vs senescent image dataset with deterministic sorted file order."""
+
+    VALID_EXTS = ('.png', '.jpg', '.jpeg', '.tif', '.tiff')
+
     def __init__(self, young_path, senescent_path, transform=None):
         self.young_path = young_path
         self.senescent_path = senescent_path
-        self.young_files = os.listdir(os.path.join(self.young_path))
-        self.senescent_files = os.listdir(os.path.join(self.senescent_path))
+        self.young_files = sorted(
+            f for f in os.listdir(self.young_path) if f.lower().endswith(self.VALID_EXTS)
+        )
+        self.senescent_files = sorted(
+            f for f in os.listdir(self.senescent_path) if f.lower().endswith(self.VALID_EXTS)
+        )
         self.transform = transform
     
     def __len__(self):

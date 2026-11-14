@@ -61,10 +61,12 @@ if root_dir not in sys.path:
 
 from models.ldm.model_v16 import CellLDM_v16, CELL_MSC
 from models.classifier.classifier import Classifier
+from models.classifier.passage_clock import get_default_v3_5_ckpt, load_passage_clock, predict_passages as clock_predict_passages
 
 dev = 'cuda' if torch.cuda.is_available() else 'cpu'
 IMNET_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to(dev)
 IMNET_STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to(dev)
+CLOCK_META = {}
 
 
 # =========================================================================
@@ -84,58 +86,25 @@ def rank_calibrate(vals, p_min, p_med, p_max):
     return out.astype(np.float32)
 
 
-class ConvNeXtMultiTask(nn.Module):
-    def __init__(self):
-        super().__init__()
-        base = models.convnext_tiny(weights=None)
-        self.features = base.features
-        self.avgpool = base.avgpool
-        in_features = base.classifier[2].in_features
-        self.norm = base.classifier[0]
-        self.age_head = nn.Sequential(
-            nn.Flatten(), nn.Linear(in_features, 128), nn.LayerNorm(128),
-            nn.GELU(), nn.Dropout(0.3), nn.Linear(128, 1), nn.Sigmoid()
-        )
-        self.phase_head = nn.Sequential(
-            nn.Flatten(), nn.Linear(in_features, 128), nn.LayerNorm(128),
-            nn.GELU(), nn.Dropout(0.3), nn.Linear(128, 3)
-        )
-
-    def forward(self, x):
-        x = self.norm(self.avgpool(self.features(x)))
-        return self.age_head(x).squeeze(1), self.phase_head(x)
-
-
 def load_convnext_classifier():
-    cls = ConvNeXtMultiTask().to(dev)
-    ckpt_path = os.path.join(root_dir, 'deneme', 'checkpoints', 'classifier_v3_convnext_best.pth')
-    ck = torch.load(ckpt_path, map_location=dev)
-    cls.load_state_dict(ck['model_state_dict'])
-    cls.eval()
+    global CLOCK_META
+    ckpt_path = get_default_v3_5_ckpt(root_dir)
+    cls, CLOCK_META = load_passage_clock(ckpt_path, device=dev)
     return cls
 
 
 def load_resnet_classifier():
     cls_r = Classifier(output_size=2).to(dev)
-    ckpt_path = os.path.join(root_dir, 'checkpoints', 'classifier', 'classifier_v2.pth')
+    ckpt_path = os.path.join(root_dir, 'checkpoints', 'classifier', 'classifier_v2_5_resnet.pth')
     ck_r = torch.load(ckpt_path, map_location=dev)
     cls_r.load_state_dict(ck_r)
     cls_r.eval()
     return cls_r
 
 
-@torch.no_grad()
-def predict_passages(cls_convnext, imgs_01, bs=32):
-    """Predicts continuous passage values using ConvNeXt-Tiny v3 resized to 224x224."""
-    preds = []
-    for i in range(0, len(imgs_01), bs):
-        batch = imgs_01[i:i + bs].to(dev)
-        g = transforms.functional.resize(batch, (224, 224), antialias=True)
-        g = (g - IMNET_MEAN) / IMNET_STD
-        ages, _ = cls_convnext(g)
-        p = ages.cpu().numpy() * 40.0 + 1.0
-        preds.extend(p.tolist())
-    return np.array(preds)
+def predict_passages(cls_convnext, imgs_01, bs=48):
+    """Predicts continuous passage values via unified PassageClock v3.5."""
+    return clock_predict_passages(cls_convnext, imgs_01, device=dev, bs=bs, meta=CLOCK_META or None)
 
 
 @torch.no_grad()
@@ -170,8 +139,8 @@ def run_trajectory(direction, args):
     step_sign = -1.0 if is_rejuv else +1.0
     clamp_val = args.min_passage if is_rejuv else args.max_passage
 
-    y_test_dir = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'young')
-    s_test_dir = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'senescent')
+    y_test_dir = os.path.join(root_dir, 'data', 'processed_v5', 'test', 'young')
+    s_test_dir = os.path.join(root_dir, 'data', 'processed_v5', 'test', 'senescent')
 
     in_dir = s_test_dir if is_rejuv else y_test_dir
     ref_dir = y_test_dir if is_rejuv else s_test_dir
@@ -247,11 +216,11 @@ def run_trajectory(direction, args):
             os.path.splitext(f)[0] for f in os.listdir(val_raw_dir)
             if f.lower().endswith(('.jpg', '.jpeg', '.png', '.tif', '.tiff'))
         ]) if os.path.exists(val_raw_dir) else []
-        cache_path = os.path.join(root_dir, 'data', 'processed_v4', 'train_continuous_ages_neutral_masked.pt')
+        cache_path = os.path.join(root_dir, 'data', 'processed_v5', 'train_continuous_ages_neutral_masked.pt')
         age_cache = torch.load(cache_path, map_location='cpu') if os.path.exists(cache_path) else {}
         cls_name = 'senescent' if is_rejuv else 'young'
         def_s = 0.3625 if is_rejuv else 0.0625
-        tr_cdir = os.path.join(root_dir, 'data', 'processed_v4', 'train', cls_name)
+        tr_cdir = os.path.join(root_dir, 'data', 'processed_v5', 'train', cls_name)
         tr_vals = []
         for fn in sorted(os.listdir(tr_cdir)):
             if fn.lower().endswith(('.png', '.jpg', '.jpeg')) and not any(fn.startswith(v + '_') for v in val_raw_prefixes):
@@ -259,7 +228,7 @@ def run_trajectory(direction, args):
                 rel_p = os.path.relpath(abs_p, root_dir)
                 norm_p = rel_p.replace('\\', '/')
                 s_val = float(age_cache.get(fn, age_cache.get(rel_p, age_cache.get(norm_p, def_s))))
-                tr_vals.append(s_val * 40.0 + 1.0)
+                tr_vals.append(s_val * 39.0 + 1.0)
         tr_vals = np.array(tr_vals, dtype=np.float32)
         p_min, p_med, p_max = (8.5, 14.5, 20.0) if is_rejuv else (2.0, 3.5, 8.5)
         tr_cal = rank_calibrate(tr_vals, p_min=p_min, p_med=p_med, p_max=p_max)
@@ -581,7 +550,7 @@ def run_trajectory(direction, args):
     ax.plot(steps, p_medians, 's--', color=c_fill, linewidth=2, markersize=7, label='Median Passage')
     ax.set_xticks(steps)
     ax.set_xticklabels(step_labels, fontsize=10)
-    ax.set_ylabel('ConvNeXt-Tiny v3 Passage', fontsize=12, fontweight='bold')
+    ax.set_ylabel('PassageClock v3.5 Passage', fontsize=12, fontweight='bold')
     ax.set_title(f"Passage {'Reduction' if is_rejuv else 'Progression'} Trajectory", fontsize=13, fontweight='bold')
     ax.grid(True, linestyle=':', alpha=0.6)
     ax.legend(frameon=True, fontsize=10)
@@ -630,7 +599,7 @@ def main():
     p.add_argument('--out_dir', default=None,
                    help='Custom root directory for outputs (defaults to results/v16_stage2_evaluation/epoch_120_progressive)')
     p.add_argument('--all', action='store_true', default=False,
-                   help='Process full test cohort (Senescent N=318, Young N=327)')
+                   help='Process full test cohort in data/processed_v5/test')
     p.add_argument('--n_samples', type=int, default=None,
                    help='Subset number of crops if specified')
     p.add_argument('--batch_size', type=int, default=8, help='Diffusion batch size')
@@ -658,7 +627,7 @@ def main():
     p.add_argument('--ddim_steps', type=int, default=100,
                    help='DDIM sampling steps (100 to match the v12/v14/v15 benchmark protocol)')
     p.add_argument('--match_v12_cohort', dest='match_v12_cohort', action='store_true',
-                   help='Restrict inputs to the v12 benchmark cohort (Aging N=327, Rejuvenation N=315)')
+                   help='Restrict inputs to the Mask R-CNN matched cohort')
     p.set_defaults(match_v12_cohort=False)
     p.add_argument('--n_steps', type=int, default=5, help='Number of gradual trajectory steps')
     p.add_argument('--delta_step', type=float, default=1.0,

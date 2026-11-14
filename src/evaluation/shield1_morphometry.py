@@ -120,7 +120,7 @@ def render_exemplar_panels(model, base_dir, results_dir, artifact_dir):
         {
             'name': 'aging',
             'title': 'Aging: Young -> Senescent (Expected: Hypertrophic Expansion)',
-            'input_dir': os.path.join(base_dir, 'data/processed_v4/test/young'),
+            'input_dir': os.path.join(base_dir, 'data/processed_v5/test/young'),
             'cg_dir': os.path.join(base_dir, 'results/generated/cyclegan_v2_sweep/epoch_160/aging'),
             'ldm_dir': os.path.join(base_dir, 'results/generated/seed_sweep/seed_2026/aging'),
             'samples': ['senescent_MSCs_10005_11.jpg', 'senescent_MSCs_10005_13.jpg', 'senescent_MSCs_10005_16.jpg'],
@@ -129,7 +129,7 @@ def render_exemplar_panels(model, base_dir, results_dir, artifact_dir):
         {
             'name': 'rejuvenation',
             'title': 'Rejuvenation: Senescent -> Young (Expected: Spindle Contraction)',
-            'input_dir': os.path.join(base_dir, 'data/processed_v4/test/senescent'),
+            'input_dir': os.path.join(base_dir, 'data/processed_v5/test/senescent'),
             'cg_dir': os.path.join(base_dir, 'results/generated/cyclegan_v2_sweep/epoch_160/rejuvenation'),
             'ldm_dir': os.path.join(base_dir, 'results/generated/seed_sweep/seed_2026/rejuv'),
             'samples': ['senescent_MSCs_10005_0.jpg', 'senescent_MSCs_10005_1.jpg', 'senescent_MSCs_10005_10.jpg'],
@@ -232,19 +232,19 @@ def render_exemplar_panels(model, base_dir, results_dir, artifact_dir):
 
 def run_full_population_evaluation(model, base_dir, results_dir, artifact_dir):
     print("\n" + "=" * 80)
-    print("RUNNING SHIELD 1: FULL POPULATION MORPHOMETRIC EVALUATION (N = 642)")
+    print("RUNNING SHIELD 1: FULL POPULATION MORPHOMETRIC EVALUATION")
     print("=" * 80)
     
     tasks = [
         {
             'task': 'aging',
-            'input_dir': os.path.join(base_dir, 'data/processed_v4/test/young'),
+            'input_dir': os.path.join(base_dir, 'data/processed_v5/test/young'),
             'cg_dir': os.path.join(base_dir, 'results/generated/cyclegan_v2_sweep/epoch_160/aging'),
             'ldm_dir': os.path.join(base_dir, 'results/generated/seed_sweep/seed_2026/aging')
         },
         {
             'task': 'rejuvenation',
-            'input_dir': os.path.join(base_dir, 'data/processed_v4/test/senescent'),
+            'input_dir': os.path.join(base_dir, 'data/processed_v5/test/senescent'),
             'cg_dir': os.path.join(base_dir, 'results/generated/cyclegan_v2_sweep/epoch_160/rejuvenation'),
             'ldm_dir': os.path.join(base_dir, 'results/generated/seed_sweep/seed_2026/rejuv')
         }
@@ -330,25 +330,29 @@ def generate_population_report_and_plots(records, results_dir, artifact_dir):
     ks_aging = stats.ks_2samp(aging_ldm_area, senes_ctrl_area)
     ks_reju = stats.ks_2samp(reju_ldm_area, young_ctrl_area)
     
+    y_q10, y_q90 = np.percentile(young_ctrl_area, [10, 90])
+    in_phys_pct = float(np.mean((reju_ldm_area >= y_q10) & (reju_ldm_area <= y_q90)) * 100.0)
+
     report = f"""================================================================================
 STATISTICAL HYPOTHESIS TESTING REPORT: CELLULAR MORPHOMETRY
 Dataset: N = {len(records)} test cell pairs ({len(aging_rec)} Aging, {len(reju_rec)} Rejuvenation)
-Model: LDM v12 vs CycleGAN Epoch 160 vs Biological Ground Truth Controls
+Model: LDM vs CycleGAN vs Biological Ground Truth Controls
 ================================================================================
 
 1. AGING HYPOTHESIS (Young -> Senescent: Cell Area Expansion Delta > 0):
    - Control Young Area:   {np.mean(young_ctrl_area):.1f} +/- {np.std(young_ctrl_area):.1f} px (Median: {np.median(young_ctrl_area):.1f})
    - LDM Senescent Area:   {np.mean(aging_ldm_area):.1f} +/- {np.std(aging_ldm_area):.1f} px (Median: {np.median(aging_ldm_area):.1f})
    - Target Biological:    {np.mean(senes_ctrl_area):.1f} +/- {np.std(senes_ctrl_area):.1f} px (Median: {np.median(senes_ctrl_area):.1f})
-   - Paired t-test:        t = {ttest_aging.statistic:.4f}, p = {ttest_aging.pvalue:.4e} (PROVEN: p < 1e-50)
-   - Kolmogorov-Smirnov:   KS = {ks_aging.statistic:.4f}, p = {ks_aging.pvalue:.4f} (ACCEPTED: p > 0.05 population match)
+   - Paired t-test:        t = {ttest_aging.statistic:.4f}, p = {ttest_aging.pvalue:.4e}
+   - Kolmogorov-Smirnov:   KS = {ks_aging.statistic:.4f}, p = {ks_aging.pvalue:.4f}
 
 2. REJUVENATION HYPOTHESIS (Senescent -> Young: Cell Area Contraction Delta < 0):
    - Control Senes Area:   {np.mean(senes_ctrl_area):.1f} +/- {np.std(senes_ctrl_area):.1f} px (Median: {np.median(senes_ctrl_area):.1f})
    - LDM Rejuvenated Area: {np.mean(reju_ldm_area):.1f} +/- {np.std(reju_ldm_area):.1f} px (Median: {np.median(reju_ldm_area):.1f})
    - Target Biological:    {np.mean(young_ctrl_area):.1f} +/- {np.std(young_ctrl_area):.1f} px (Median: {np.median(young_ctrl_area):.1f})
-   - Paired t-test:        t = {ttest_reju.statistic:.4f}, p = {ttest_reju.pvalue:.4e} (PROVEN: p < 1e-60)
-   - Physiological Range:  83.5% of LDM rejuvenated cells fit strictly within biological bounds [14.8k, 62.2k px].
+   - Paired t-test:        t = {ttest_reju.statistic:.4f}, p = {ttest_reju.pvalue:.4e}
+   - Kolmogorov-Smirnov:   KS = {ks_reju.statistic:.4f}, p = {ks_reju.pvalue:.4f}
+   - Physiological Range:  {in_phys_pct:.1f}% of LDM rejuvenated cells fit within real young 10th-90th pct [{y_q10/1000:.1f}k, {y_q90/1000:.1f}k px].
 ================================================================================
 """
     rep_path = os.path.join(results_dir, 'statistical_hypothesis_report.txt')
@@ -399,7 +403,7 @@ Model: LDM v12 vs CycleGAN Epoch 160 vs Biological Ground Truth Controls
     ax_d.set_title('D) Foreground Specificity Index (CDI > 1.0x)', fontweight='bold', fontsize=12)
     ax_d.axhline(1.0, color='red', linestyle='--', alpha=0.7)
     
-    plt.suptitle('Shield 1: Cellular Morphometry & Manifold Population Alignment (N = 642)', fontsize=15, fontweight='bold', y=0.995)
+    plt.suptitle(f'Shield 1: Cellular Morphometry & Manifold Population Alignment (N = {len(records)})', fontsize=15, fontweight='bold', y=0.995)
     out_fig = os.path.join(results_dir, 'figure_population_violin_plots.png')
     plt.savefig(out_fig, bbox_inches='tight', dpi=300)
     plt.close()
@@ -417,7 +421,7 @@ def main():
     base_dir = root_dir
     weights_path = os.path.join(base_dir, 'fatma hoca', 'mask_rcnn_object_0800.h5')
     results_dir = os.path.join(base_dir, 'results', 'morphological_validation')
-    artifact_dir = r"C:\Users\emir_\.gemini\antigravity-ide\brain\5ba6371e-e7f8-4738-bb94-e1efd97424b7"
+    artifact_dir = os.environ.get('AGY_ARTIFACT_DIR')
     os.makedirs(results_dir, exist_ok=True)
     
     print("[*] Loading Mask R-CNN detector...")

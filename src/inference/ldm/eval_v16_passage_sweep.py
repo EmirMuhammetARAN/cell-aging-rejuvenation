@@ -1,7 +1,7 @@
 """
 LDM v16 Stage-1 Evaluation: Does the passage condition actually control morphology?
 ===================================================================================
-Judge: ConvNeXt-Tiny classifier v3 (deneme/checkpoints/classifier_v3_convnext_best.pth), trained on all
+Judge: PassageClock v3.5 (checkpoints/classifier/classifier_v3_5_convnext.pth), trained on all
 donors EXCEPT hFB14. All real reference data below is the held-out donor hFB14 (never seen by the
 classifier nor by the LDM), so the judge is independent of the generator.
 
@@ -50,45 +50,16 @@ if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
 from models.ldm.model_v16 import CellLDM_v16
+from models.classifier.passage_clock import get_default_v3_5_ckpt, load_passage_clock, predict_passages
 
 VAL_DONOR = 'hFB14'
 TILES_DIR = os.path.join(root_dir, 'deneme', 'processed_tiles')
-CLS_CKPT = os.path.join(root_dir, 'deneme', 'checkpoints', 'classifier_v3_convnext_best.pth')
-IMNET_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
-IMNET_STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+CLS_CKPT = get_default_v3_5_ckpt(root_dir)
+CLOCK_META = {}
 
 
-class ConvNeXtMultiTask(nn.Module):
-    """Same architecture as deneme/evaluate_convnext_test.py (age head = sigmoid of (p-1)/39)."""
-    def __init__(self):
-        super().__init__()
-        base = models.convnext_tiny(weights=None)
-        self.features = base.features
-        self.avgpool = base.avgpool
-        in_features = base.classifier[2].in_features
-        self.norm = base.classifier[0]
-        self.age_head = nn.Sequential(nn.Flatten(), nn.Linear(in_features, 128), nn.LayerNorm(128),
-                                      nn.GELU(), nn.Dropout(0.3), nn.Linear(128, 1), nn.Sigmoid())
-        self.phase_head = nn.Sequential(nn.Flatten(), nn.Linear(in_features, 128), nn.LayerNorm(128),
-                                        nn.GELU(), nn.Dropout(0.3), nn.Linear(128, 3))
-
-    def forward(self, x):
-        x = self.norm(self.avgpool(self.features(x)))
-        return self.age_head(x).squeeze(1), self.phase_head(x)
-
-
-@torch.no_grad()
-def predict_passage(cls, imgs01, device, bs=32):
-    """imgs01: (N,3,H,W) in [0,1] on CPU. Returns predicted passage (N,) = score*39+1."""
-    out = []
-    for i in range(0, len(imgs01), bs):
-        x = imgs01[i:i + bs].to(device).float()
-        g = (0.299 * x[:, 0:1] + 0.587 * x[:, 1:2] + 0.114 * x[:, 2:3]).repeat(1, 3, 1, 1)
-        g = F.interpolate(g, size=(256, 256), mode='bilinear', antialias=True, align_corners=False)
-        g = (g - IMNET_MEAN.to(device)) / IMNET_STD.to(device)
-        age, _ = cls(g)
-        out.append((age.float().cpu().numpy() * 39.0 + 1.0))
-    return np.concatenate(out)
+def predict_passage(cls, imgs01, device, bs=48):
+    return predict_passages(cls, imgs01, device=device, bs=bs, meta=CLOCK_META or None)
 
 
 def load_tile(fname):
@@ -141,9 +112,8 @@ def main():
           f"steps={args.steps} | cfg={args.cfg} | seed={args.seed}\n{'='*80}")
 
     # ---- models
-    cls = ConvNeXtMultiTask().to(device)
-    cls.load_state_dict(torch.load(CLS_CKPT, map_location=device)['model_state_dict'])
-    cls.eval()
+    global CLOCK_META
+    cls, CLOCK_META = load_passage_clock(CLS_CKPT, device=device)
 
     model = CellLDM_v16()
     model.to(device)
@@ -309,7 +279,7 @@ def main():
         return 'WEAK: passage conditioning is not reliably controlling morphology'
 
     md = [f"# LDM v16 Stage-1 Evaluation ({tag})", "",
-          f"Judge: ConvNeXt classifier v3 (never saw hFB14). Held-out donor: **{VAL_DONOR}**. "
+          f"Judge: PassageClock v3.5 ({os.path.basename(CLS_CKPT)}, never saw hFB14). Held-out donor: **{VAL_DONOR}**. "
           f"Sampling: {args.steps} DDIM steps, CFG {args.cfg}, seed {args.seed}, EMA weights.", "",
           "## 0. Judge ceiling on REAL held-out tiles",
           f"- Spearman(true, predicted passage) = **{real_rho:.3f}**, MAE = **{real_mae:.2f}** passages (N={len(cal)}).",

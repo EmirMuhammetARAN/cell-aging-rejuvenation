@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 # Security & Secret Credentials (ZERO-LEAK POLICY)
 # ==============================================================================
 .env
@@ -138,3 +138,5 @@ Supplementary_Information.md
 # Local Legacy Archives (kept on disk, excluded from Git)
 archive/
 **/archive/
+scratch/
+colab_l4_training.ipynb

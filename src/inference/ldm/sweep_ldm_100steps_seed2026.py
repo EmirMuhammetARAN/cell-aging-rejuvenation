@@ -48,8 +48,8 @@ REJUV_CFG = 3.5
 NUM_STEPS = 100
 BATCH_SIZE = 8
 
-TEST_YOUNG = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'young')
-TEST_SENES = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'senescent')
+TEST_YOUNG = os.path.join(root_dir, 'data', 'processed_v5', 'val', 'young')
+TEST_SENES = os.path.join(root_dir, 'data', 'processed_v5', 'val', 'senescent')
 CKPT_DIR = os.path.join(root_dir, 'checkpoints', 'ldm')
 OUT_BASE = os.path.join(root_dir, 'results', 'generated', 'ldm_v12_sweep_100steps_seed2026')
 os.makedirs(OUT_BASE, exist_ok=True)
@@ -65,13 +65,13 @@ cls_transform = transforms.Compose([
 ])
 
 CHECKPOINTS = [
-    {'name': 'Base Epoch 50', 'epoch': 50, 'ckpt': os.path.join(CKPT_DIR, 'checkpoint_v12_v4_data_epoch_50.pt')},
-    {'name': 'Base Epoch 100', 'epoch': 100, 'ckpt': os.path.join(CKPT_DIR, 'checkpoint_v12_v4_data_epoch_100.pt')},
-    {'name': 'Base Epoch 150', 'epoch': 150, 'ckpt': os.path.join(CKPT_DIR, 'checkpoint_v12_v4_data_epoch_150.pt')},
-    {'name': 'Base Epoch 200', 'epoch': 200, 'ckpt': os.path.join(CKPT_DIR, 'checkpoint_v12_v4_data_epoch_200.pt')},
-    {'name': 'Base Epoch 250', 'epoch': 250, 'ckpt': os.path.join(CKPT_DIR, 'checkpoint_v12_v4_data_epoch_250.pt')},
-    {'name': 'Latent-L1 FT (Total Epoch 275)', 'epoch': 275, 'ckpt': os.path.join(CKPT_DIR, 'checkpoint_v12_v4_data_lpips_epoch_25.pt')},
-    {'name': 'Latent-L1 FT (Total Epoch 300)', 'epoch': 300, 'ckpt': os.path.join(CKPT_DIR, 'checkpoint_v12_v4_data_lpips_last.pt')}
+    {'name': 'Base Epoch 50', 'epoch': 50, 'ckpt': os.path.join(CKPT_DIR, 'checkpoint_v12_v5_data_epoch_50.pt')},
+    {'name': 'Base Epoch 100', 'epoch': 100, 'ckpt': os.path.join(CKPT_DIR, 'checkpoint_v12_v5_data_epoch_100.pt')},
+    {'name': 'Base Epoch 150', 'epoch': 150, 'ckpt': os.path.join(CKPT_DIR, 'checkpoint_v12_v5_data_epoch_150.pt')},
+    {'name': 'Base Epoch 200', 'epoch': 200, 'ckpt': os.path.join(CKPT_DIR, 'checkpoint_v12_v5_data_epoch_200.pt')},
+    {'name': 'Base Epoch 250', 'epoch': 250, 'ckpt': os.path.join(CKPT_DIR, 'checkpoint_v12_v5_data_epoch_250.pt')},
+    {'name': 'Latent-L1 FT (Total Epoch 275)', 'epoch': 275, 'ckpt': os.path.join(CKPT_DIR, 'checkpoint_v12_v5_data_lpips_epoch_25.pt')},
+    {'name': 'Latent-L1 FT (Total Epoch 300)', 'epoch': 300, 'ckpt': os.path.join(CKPT_DIR, 'checkpoint_v12_v5_data_lpips_last.pt')}
 ]
 
 
@@ -196,7 +196,7 @@ def main():
     print(f"{'='*75}")
 
     classifier = Classifier(output_size=2).to(DEVICE)
-    cls_path = os.path.join(root_dir, 'checkpoints', 'classifier', 'classifier_v2.pth')
+    cls_path = os.path.join(root_dir, 'checkpoints', 'classifier', 'classifier_v2_5_resnet.pth')
     classifier.load_state_dict(torch.load(cls_path, map_location=DEVICE))
     classifier.eval()
 

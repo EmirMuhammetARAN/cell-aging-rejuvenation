@@ -17,7 +17,7 @@ from src.inference.ldm.calculate_metrics import calculate_fid, calculate_classif
 
 SEEDS = [42, 1024, 2026, 7777, 9999]
 # En istikrarlı performans gösteren epoch 50'yi kullanıyoruz, istersen _last.pt olarak değiştirebilirsin
-CKPT_PATH = os.path.join(root_dir, 'checkpoints', 'ldm', 'checkpoint_v12_v4_data_lpips_last.pt')
+CKPT_PATH = os.path.join(root_dir, 'checkpoints', 'ldm', 'checkpoint_v12_v5_data_lpips_last.pt')
 OUTPUT_DIR = os.path.join(root_dir, 'results', 'generated', 'seed_sweep')
 
 AGING_STRENGTH = 0.75

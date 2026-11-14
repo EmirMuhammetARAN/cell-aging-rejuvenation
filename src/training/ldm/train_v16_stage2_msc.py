@@ -2,10 +2,10 @@
 LDM v16 - Stage 2: MSC Fine-Tuning with Continuous Pseudo-Passages
 ===================================================================
   - Base Model:   checkpoints/ldm/best_model_v16_fibroblast_passage.pt (Stage 1 pre-trained)
-  - Data:         8,312 MSC crops (data/processed_v4/train) conditioned on continuous pseudo-passages [2.0, 38.5]
-                  computed via Classifier v3 (ConvNeXt-Tiny) on the Picard lifespan scale.
+  - Data:         MSC train crops (data/processed_v5/train) conditioned on continuous pseudo-passages
+                  computed via the Stage-1 continuous passage clock on the Picard lifespan scale.
   - Conditioning: cell_type = 1 (MSC), continuous pseudo-passage (sinusoidal + MLP)
-  - Validation:   645 MSC crops (data/processed_v4/test) evaluated on EMA weights.
+  - Validation:   Held-out MSC val crops (data/processed_v5/val) evaluated on EMA weights.
   - Optimization: AdamW, peak LR (5e-5 -> 1e-6 cosine decay), warmup 2 epochs, bf16 autocast, EMA.
                   Supports seamless Cosine Warm-Restart for extended schedules (e.g., 30 -> 90 epochs).
   - Seed:         2026
@@ -82,7 +82,7 @@ def parse_args():
                    help='Intra-class inverse frequency power (0.0 = pure 50/50 class balance with uniform per-cell weight)')
     p.add_argument('--sampler_bin', type=float, default=1.0,
                    help='Passage bin width for intra-class passage sampling')
-    p.add_argument('--val_stride', type=int, default=1, help='use every N-th val image for fast val loss (1 = full 616-cell val set)')
+    p.add_argument('--val_stride', type=int, default=1, help='use every N-th val image for fast val loss (1 = full val set)')
     p.add_argument('--val_freq', type=int, default=2)
     p.add_argument('--save_interval', type=int, default=15,
                    help='Save milestone checkpoints every N epochs (e.g., 45, 60, 75, 90, 105, 120, 135, 150)')

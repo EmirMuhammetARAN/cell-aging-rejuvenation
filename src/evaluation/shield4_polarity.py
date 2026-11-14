@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 SHIELD 4: Cellular Polarity, Circularity & Spindle-Shape Restoration
 =====================================================================
@@ -22,7 +22,7 @@ base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 sys.path.insert(0, base_dir)
 
 results_dir = os.path.join(base_dir, "results", "morphological_validation")
-artifact_dir = r"C:\Users\emir_\.gemini\antigravity-ide\brain\5ba6371e-e7f8-4738-bb94-e1efd97424b7"
+artifact_dir = os.environ.get('AGY_ARTIFACT_DIR')
 os.makedirs(results_dir, exist_ok=True)
 
 # 1. Load Data
@@ -87,7 +87,7 @@ print(f"  Directional Spindle Restoration (Delta C < 0): LDM {rejuv_fidelity:.1f
 # 3. Generate Report Text
 report_text = f"""================================================================================
 SHIELD 4: CELLULAR POLARITY, CIRCULARITY & SPINDLE-SHAPE RESTORATION REPORT
-Population: N = 327 Aging + 318 Rejuvenation = 645 Test Cells (Full Evaluation)
+Population: N = {len(aging_rows)} Aging + {len(rejuv_rows)} Rejuvenation = {len(rows)} Test Cells (Full Evaluation)
 ================================================================================
 
 1. AGING POLARITY LOSS (Young Spindle -> Senescent Pancake):
@@ -95,30 +95,27 @@ Population: N = 327 Aging + 318 Rejuvenation = 645 Test Cells (Full Evaluation)
 - Real Young Input Circularity:       {np.mean(in_circ_aging):.4f} ± {np.std(in_circ_aging):.4f} (Median: {np.median(in_circ_aging):.3f}, IQR: [{np.percentile(in_circ_aging, 25):.3f}, {np.percentile(in_circ_aging, 75):.3f}])
 - CycleGAN Aged Circularity:          {np.mean(cg_circ_aging):.4f} ± {np.std(cg_circ_aging):.4f} (Delta: {np.mean(cg_circ_aging - in_circ_aging):+.4f})
 - LDM Aged Circularity:               {np.mean(ldm_circ_aging):.4f} ± {np.std(ldm_circ_aging):.4f} (Median: {np.median(ldm_circ_aging):.3f}, IQR: [{np.percentile(ldm_circ_aging, 25):.3f}, {np.percentile(ldm_circ_aging, 75):.3f}])
-- Mean Delta Circularity:             {np.mean(delta_circ_aging):+.4f} (+{(np.mean(ldm_circ_aging)/np.mean(in_circ_aging)-1)*100:.1f}% Rounding Expansion)
-- Paired Student's t-test:            t = {t_a:.4f}, p = {p_a:.4e} (Extremely Significant)
+- Mean Delta Circularity:             {np.mean(delta_circ_aging):+.4f} ({(np.mean(ldm_circ_aging)/np.mean(in_circ_aging)-1)*100:+.1f}% Rounding Expansion)
+- Paired Student's t-test:            t = {t_a:.4f}, p = {p_a:.4e}
 - Wilcoxon Signed-Rank Test:          W = {w_a:.1f}, p = {pw_a:.4e}
-- Two-Sample Kolmogorov-Smirnov Test: KS = {ks_a:.4f}, p = {p_ks_a:.4f} (p > 0.05: LDM matches real senescent manifold!)
+- Two-Sample Kolmogorov-Smirnov Test: KS = {ks_a:.4f}, p = {p_ks_a:.4f}
 - Directional Rounding Fidelity:      {aging_fidelity:.1f}% ({np.sum(delta_circ_aging > 0)}/{len(aging_rows)} cells)
 
 2. REJUVENATION SPINDLE RESTORATION (Senescent Pancake -> Young Spindle):
 --------------------------------------------------------------------------------
 - Real Senescent Input Circularity:   {np.mean(in_circ_rejuv):.4f} ± {np.std(in_circ_rejuv):.4f} (Median: {np.median(in_circ_rejuv):.3f}, IQR: [{np.percentile(in_circ_rejuv, 25):.3f}, {np.percentile(in_circ_rejuv, 75):.3f}])
-- CycleGAN Young Circularity:         {np.mean(cg_circ_rejuv):.4f} ± {np.std(cg_circ_rejuv):.4f} (Delta: {np.mean(cg_circ_rejuv - in_circ_rejuv):+.4f}, p = {p_cg_r:.4f} -> FAILS TO SPINDLE)
+- CycleGAN Young Circularity:         {np.mean(cg_circ_rejuv):.4f} ± {np.std(cg_circ_rejuv):.4f} (Delta: {np.mean(cg_circ_rejuv - in_circ_rejuv):+.4f}, p = {p_cg_r:.4e})
 - LDM Young Circularity:              {np.mean(ldm_circ_rejuv):.4f} ± {np.std(ldm_circ_rejuv):.4f} (Median: {np.median(ldm_circ_rejuv):.3f}, IQR: [{np.percentile(ldm_circ_rejuv, 25):.3f}, {np.percentile(ldm_circ_rejuv, 75):.3f}])
-- Mean Delta Circularity:             {np.mean(delta_circ_rejuv):+.4f} ({(np.mean(ldm_circ_rejuv)/np.mean(in_circ_rejuv)-1)*100:.1f}% Spindle Condensation)
-- Paired Student's t-test:            t = {t_r:.4f}, p = {p_r:.4e} (Extremely Significant)
+- Mean Delta Circularity:             {np.mean(delta_circ_rejuv):+.4f} ({(np.mean(ldm_circ_rejuv)/np.mean(in_circ_rejuv)-1)*100:+.1f}% Spindle Condensation)
+- Paired Student's t-test:            t = {t_r:.4f}, p = {p_r:.4e}
 - Wilcoxon Signed-Rank Test:          W = {w_r:.1f}, p = {pw_r:.4e}
 - Directional Spindle Fidelity:       LDM {rejuv_fidelity:.1f}% ({np.sum(delta_circ_rejuv < 0)}/{len(rejuv_rows)}) vs. CycleGAN {cg_rejuv_fidelity:.1f}% ({np.sum(cg_circ_rejuv < in_circ_rejuv)}/{len(rejuv_rows)})
 
 3. BIOLOGICAL CONCLUSION:
 --------------------------------------------------------------------------------
-Young MSCs exhibit an elongated, spindle-shaped (fibroblastic) morphology with low circularity (C ~ 0.11), 
-governed by apical-basal cytoskeletal actin tension. Upon senescence, stress fiber disorganization causes 
-isotropic flattening into a fried-egg circular pancake (C ~ 0.20-0.21, p < 10^-33).
-Crucially, while CycleGAN fails to restore the spindle phenotype (delta = +0.0031, p = 0.64), 
-LDM successfully condenses and polarizes senescent cells back into elongated spindle morphologies 
-(delta = -0.0501, p = 2.94 x 10^-11), confirming genuine biological phenotypic reprogramming.
+Young MSCs exhibit lower circularity (mean {np.mean(in_circ_aging):.3f} ± {np.std(in_circ_aging):.3f}) than senescent MSCs (mean {np.mean(in_circ_rejuv):.3f} ± {np.std(in_circ_rejuv):.3f}).
+CycleGAN rejuvenation delta = {np.mean(cg_circ_rejuv - in_circ_rejuv):+.4f} (p = {p_cg_r:.4e}),
+whereas LDM rejuvenation delta = {np.mean(delta_circ_rejuv):+.4f} (p = {p_r:.4e}).
 ================================================================================
 """
 
@@ -172,7 +169,7 @@ ax1.set_title("A. Cellular Polarity Loss in Aging (Young Spindle → Senescent P
 ax1.grid(True, linestyle='--', alpha=0.5, axis='y')
 
 # Annotations
-ax1.text(0.03, 0.90, f"LDM vs Input: t = +13.66, p = 6.59 × 10⁻³⁴ (***)\nKS Manifold (LDM vs Real Senes): p = 0.6859 (Aligned)",
+ax1.text(0.03, 0.90, f"LDM vs Input: t = {t_a:+.2f}, p = {p_a:.2e}\nKS Manifold (LDM vs Real Senes): KS = {ks_a:.4f}, p = {p_ks_a:.4f}",
          transform=ax1.transAxes, fontsize=9.5, fontweight='bold',
          bbox=dict(boxstyle='round,pad=0.4', facecolor='#fee2e2', edgecolor='#ef4444', alpha=0.9))
 
@@ -208,7 +205,7 @@ ax2.set_title("B. Spindle Shape Restoration in Rejuvenation (Pancake → Spindle
 ax2.grid(True, linestyle='--', alpha=0.5, axis='y')
 
 # Annotations
-ax2.text(0.03, 0.90, f"LDM vs Input: t = -6.89, p = 2.94 × 10⁻¹¹ (***)\nCycleGAN vs Input: p = 0.6384 (Fails to Spindle)\nSpindle Recovery Rate: LDM 67.9% vs CycleGAN 53.1%",
+ax2.text(0.03, 0.90, f"LDM vs Input: t = {t_r:+.2f}, p = {p_r:.2e}\nCycleGAN vs Input: p = {p_cg_r:.4f}\nSpindle Recovery Rate: LDM {rejuv_fidelity:.1f}% vs CycleGAN {cg_rejuv_fidelity:.1f}%",
          transform=ax2.transAxes, fontsize=9.5, fontweight='bold',
          bbox=dict(boxstyle='round,pad=0.4', facecolor='#dcfce7', edgecolor='#10b981', alpha=0.9))
 
@@ -216,13 +213,13 @@ ax2.text(0.03, 0.90, f"LDM vs Input: t = -6.89, p = 2.94 × 10⁻¹¹ (***)\nCyc
 ax3 = fig.add_subplot(gs[1, 0])
 bins = np.linspace(-0.5, 0.6, 55)
 ax3.hist(delta_circ_aging, bins=bins, color=col_senes, alpha=0.65, edgecolor='black',
-         label=f"Aging ΔCircularity (Mean: +{np.mean(delta_circ_aging):.3f}, +81.6% Rounding)")
+         label=f"Aging ΔCircularity (Mean: {np.mean(delta_circ_aging):+.3f}, {(np.mean(ldm_circ_aging)/np.mean(in_circ_aging)-1)*100:+.1f}%)")
 ax3.hist(delta_circ_rejuv, bins=bins, color=col_young, alpha=0.65, edgecolor='black',
-         label=f"Rejuvenation ΔCircularity (Mean: {np.mean(delta_circ_rejuv):.3f}, -25.6% Spindle)")
+         label=f"Rejuvenation ΔCircularity (Mean: {np.mean(delta_circ_rejuv):+.3f}, {(np.mean(ldm_circ_rejuv)/np.mean(in_circ_rejuv)-1)*100:+.1f}%)")
 ax3.axvline(0, color='black', linestyle='--', linewidth=2.0, alpha=0.7)
 ax3.set_xlabel("Paired Morphological Change: ΔCircularity (Output - Input)", fontsize=11, fontweight='bold')
 ax3.set_ylabel("Cell Frequency Count", fontsize=11, fontweight='bold')
-ax3.set_title("C. Bidirectional Polarity Reversibility Distributions (N = 645 Pairs)", fontsize=12, fontweight='bold')
+ax3.set_title(f"C. Bidirectional Polarity Reversibility Distributions (N = {len(rows)} Pairs)", fontsize=12, fontweight='bold')
 ax3.legend(fontsize=9.5, loc='upper right')
 ax3.grid(True, linestyle='--', alpha=0.5)
 
@@ -235,19 +232,19 @@ ax4.set_title("D. Biological Polarity & Spindle-Form Quantitative Benchmark", fo
 summary_rows = [
     ("Morphological Phenomenon", "Young (Fusiform Spindle)", "Senescent (Fried-Egg Pancake)", "Biological Significance"),
     ("Cytoskeletal Polarity", "High (Apical-Basal Tension)", "Low (Isotropic Flattening)", "Actin filament reorganization"),
-    ("Circularity (4πA/P²)", f"0.114 ± 0.057", f"0.197 ± 0.107", f"p = 6.59 × 10⁻³⁴ (Aging Shift)"),
-    ("LDM Aging Effect", "Input C = 0.114", f"LDM Aged C = {np.mean(ldm_circ_aging):.3f} (+81.6%)", "Hypothesis Confirmed (p < 10⁻³³)"),
-    ("LDM Rejuvenation Effect", f"LDM Rejuv C = {np.mean(ldm_circ_rejuv):.3f} (-25.6%)", "Input C = 0.197", "Spindle Restored (p = 2.94 × 10⁻¹¹)"),
-    ("CycleGAN Rejuvenation", f"CycleGAN C = {np.mean(cg_circ_rejuv):.3f} (Δ=+0.003)", "Input C = 0.197", "Failed (p = 0.638, No Restoration)"),
-    ("Manifold Alignment (KS)", f"KS = 0.0549", f"p = 0.6859 (> 0.05)", "Indistinguishable from Real Senescent"),
-    ("Population Spindle Recovery", "LDM: 67.9% of Cells", "CycleGAN: 53.1% of Cells", "LDM +14.8% Higher Geometric Fidelity")
+    ("Circularity (4πA/P²)", f"{np.mean(in_circ_aging):.3f} ± {np.std(in_circ_aging):.3f}", f"{np.mean(in_circ_rejuv):.3f} ± {np.std(in_circ_rejuv):.3f}", f"p = {p_a:.2e} (Aging Shift)"),
+    ("LDM Aging Effect", f"Input C = {np.mean(in_circ_aging):.3f}", f"LDM Aged C = {np.mean(ldm_circ_aging):.3f} ({(np.mean(ldm_circ_aging)/np.mean(in_circ_aging)-1)*100:+.1f}%)", f"p = {p_a:.2e}"),
+    ("LDM Rejuvenation Effect", f"LDM Rejuv C = {np.mean(ldm_circ_rejuv):.3f} ({(np.mean(ldm_circ_rejuv)/np.mean(in_circ_rejuv)-1)*100:+.1f}%)", f"Input C = {np.mean(in_circ_rejuv):.3f}", f"p = {p_r:.2e}"),
+    ("CycleGAN Rejuvenation", f"CycleGAN C = {np.mean(cg_circ_rejuv):.3f} (Δ={np.mean(cg_circ_rejuv - in_circ_rejuv):+.3f})", f"Input C = {np.mean(in_circ_rejuv):.3f}", f"p = {p_cg_r:.3f}"),
+    ("Manifold Alignment (KS)", f"KS = {ks_a:.4f}", f"p = {p_ks_a:.4f}", "LDM vs Real Senescent"),
+    ("Population Spindle Recovery", f"LDM: {rejuv_fidelity:.1f}%", f"CycleGAN: {cg_rejuv_fidelity:.1f}%", f"Diff: {rejuv_fidelity - cg_rejuv_fidelity:+.1f}%")
 ]
 
 y_start = 0.90
 for i, (col1, col2, col3, col4) in enumerate(summary_rows):
     is_header = (i == 0)
-    col_color = '#38bdf8' if is_header else ('#4ade80' if "Spindle Restored" in col4 or "Hypothesis" in col4 else ('#f87171' if "Failed" in col4 else 'white'))
-    font_weight = 'bold' if (is_header or "LDM" in col1 or "Failed" in col4) else 'normal'
+    col_color = '#38bdf8' if is_header else ('#4ade80' if ("LDM" in col1 and i in (3, 4)) else ('#f87171' if "CycleGAN" in col1 else 'white'))
+    font_weight = 'bold' if (is_header or "LDM" in col1 or "CycleGAN" in col1) else 'normal'
     
     ax4.text(0.03, y_start, col1, color=col_color, fontsize=9, fontweight=font_weight, transform=ax4.transAxes)
     ax4.text(0.38, y_start, col2, color=col_color, fontsize=8.5, fontweight=font_weight, transform=ax4.transAxes)
@@ -256,7 +253,7 @@ for i, (col1, col2, col3, col4) in enumerate(summary_rows):
     
     y_start -= 0.11
 
-plt.suptitle("Biological Shield 4: Cellular Polarity, Circularity & Spindle-Shape Restoration (Full Population N = 645 Test Cells)",
+plt.suptitle(f"Biological Shield 4: Cellular Polarity, Circularity & Spindle-Shape Restoration (Full Population N = {len(rows)} Test Cells)",
              fontsize=14, fontweight='bold', y=0.98)
 
 out_fig_name = "figure_cellular_polarity_circularity.png"

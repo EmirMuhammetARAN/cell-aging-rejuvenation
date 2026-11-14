@@ -12,7 +12,10 @@ class CellLDM(nn.Module):
         if vae_path is not None:
             self.vae = AutoencoderKL.from_pretrained(vae_path, local_files_only=True)
         else:
-            self.vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse", local_files_only=True)
+            try:
+                self.vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse", local_files_only=True)
+            except Exception:
+                self.vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse", local_files_only=False)
 
         self.num_classes = num_classes
         self.cfg_drop_prob = cfg_drop_prob

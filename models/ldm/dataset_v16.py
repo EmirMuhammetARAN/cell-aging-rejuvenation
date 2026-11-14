@@ -83,19 +83,19 @@ class FibroblastPassageDataset(Dataset):
 
 class MSCPassageDataset(Dataset):
     """
-    Dataset for LDM v16 Stage 2: MSC crops (data/processed_v4) with class-calibrated continuous passages.
-    - Split policy (FOV-level, strictly independent of data/processed_v4/test):
-        * 'train' = 7,696 MSC crops from data/processed_v4/train excluding data/raw/val FOVs
-        * 'val'   = 616 MSC crops from data/processed_v4/train belonging to the 20 held-out FOVs in data/raw/val
-        * 'test'  = 645 MSC crops from data/processed_v4/test (blinded; never used in training or checkpoint selection)
+    Dataset for LDM v16 Stage 2: MSC crops (data/processed_v5) with class-calibrated continuous passages.
+    - Split policy (plate/FOV-level, strictly zero cross-split leakage):
+        * 'train' = data/processed_v5/train MSC crops
+        * 'val'   = data/processed_v5/val MSC crops (19 held-out gold plates, 346 crops; falls back to raw/val prefix filter only for legacy datasets without a val folder)
+        * 'test'  = data/processed_v5/test MSC crops (blinded; never used in training or checkpoint selection)
     - Preserves ground-truth class boundaries (0% cross-class label contamination) while maintaining
-      the continuous intra-class biological age ordering predicted by Classifier v3 (ConvNeXt-Tiny):
+      the continuous intra-class biological age ordering predicted by the continuous passage clock:
         * Young MSCs (class 0):     mapped monotonically to P[2.0, 8.5]  (Median P3.5)
         * Senescent MSCs (class 1): mapped monotonically to P[8.5, 20.0] (Median P14.5)
       Validation/test passages are calibrated strictly via monotonic interpolation from the 'train' split quantiles.
     - Returns (image [-1, 1] RGB, passage float, cell_type=1 [MSC])
     """
-    def __init__(self, root_dir, split='train', data_version='processed_v4',
+    def __init__(self, root_dir, split='train', data_version='processed_v5',
                  augment=None, passage_jitter=0.20, calibrate_classes=True):
         if split not in ('train', 'val', 'test'):
             raise ValueError(f"split must be 'train', 'val', or 'test', got {split}")
@@ -106,44 +106,56 @@ class MSCPassageDataset(Dataset):
         self.passage_jitter = passage_jitter if self.is_train else 0.0
         self.calibrate_classes = calibrate_classes
 
+        explicit_val_dir = os.path.join(root_dir, 'data', data_version, 'val')
+        has_explicit_val = os.path.isdir(explicit_val_dir)
+
         val_raw_dir = os.path.join(root_dir, 'data', 'raw', 'val')
         val_raw_prefixes = sorted([
             os.path.splitext(f)[0] for f in os.listdir(val_raw_dir)
             if f.lower().endswith(('.jpg', '.jpeg', '.png', '.tif', '.tiff'))
-        ]) if os.path.exists(val_raw_dir) else []
+        ]) if (not has_explicit_val and os.path.exists(val_raw_dir)) else []
 
         cache_path = os.path.join(root_dir, 'data', data_version, 'train_continuous_ages_neutral_masked.pt')
         if not os.path.exists(cache_path):
             cache_path = os.path.join(root_dir, 'data', data_version, 'train_continuous_ages.pt')
         age_cache = torch.load(cache_path, map_location='cpu') if os.path.exists(cache_path) else {}
 
+        def _collect_split_dir(split_dir):
+            recs = []
+            for cls_idx, (class_name, def_score) in enumerate([('young', 0.0625), ('senescent', 0.3625)]):
+                cdir = os.path.join(split_dir, class_name)
+                if not os.path.exists(cdir):
+                    continue
+                for fname in sorted(os.listdir(cdir)):
+                    if fname.lower().endswith(('.png', '.jpg', '.jpeg')):
+                        abs_p = os.path.join(cdir, fname)
+                        rel_p = os.path.relpath(abs_p, root_dir)
+                        norm_p = rel_p.replace('\\', '/')
+                        s = float(age_cache.get(fname, age_cache.get(rel_p, age_cache.get(norm_p, def_score))))
+                        raw_pas = s * 39.0 + 1.0
+                        recs.append((abs_p, fname, raw_pas, cls_idx))
+            return recs
+
         # Always collect train_pool first so val/test calibration is fit strictly on train_pool
-        train_pool = []
-        val_pool = []
         train_data_dir = os.path.join(root_dir, 'data', data_version, 'train')
-        for cls_idx, (class_name, def_score) in enumerate([('young', 0.0625), ('senescent', 0.3625)]):
-            cdir = os.path.join(train_data_dir, class_name)
-            if not os.path.exists(cdir):
-                continue
-            for fname in sorted(os.listdir(cdir)):
-                if fname.lower().endswith(('.png', '.jpg', '.jpeg')):
-                    abs_p = os.path.join(cdir, fname)
-                    rel_p = os.path.relpath(abs_p, root_dir)
-                    norm_p = rel_p.replace('\\', '/')
-                    s = float(age_cache.get(fname, age_cache.get(rel_p, age_cache.get(norm_p, def_score))))
-                    raw_pas = s * 40.0 + 1.0
-                    rec = (abs_p, fname, raw_pas, cls_idx)
-                    if any(fname.startswith(v + '_') for v in val_raw_prefixes):
-                        val_pool.append(rec)
-                    else:
-                        train_pool.append(rec)
+        all_train_recs = _collect_split_dir(train_data_dir)
+        if has_explicit_val:
+            train_pool = all_train_recs
+            val_pool = _collect_split_dir(explicit_val_dir)
+        else:
+            train_pool, val_pool = [], []
+            for rec in all_train_recs:
+                if any(rec[1].startswith(v + '_') for v in val_raw_prefixes):
+                    val_pool.append(rec)
+                else:
+                    train_pool.append(rec)
 
         if split == 'train':
             raw_records = train_pool
         elif split == 'val':
             raw_records = val_pool
         else:
-            pred_csv_path = os.path.join(root_dir, 'deneme', 'convnext_msc_test_predictions.csv')
+            pred_csv_path = os.path.join(root_dir, 'results', 'classifier_v3_5_test_predictions.csv')
             pred_map = {}
             if os.path.exists(pred_csv_path):
                 df_pred = pd.read_csv(pred_csv_path)

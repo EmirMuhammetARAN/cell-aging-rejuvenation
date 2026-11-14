@@ -16,14 +16,21 @@ from PIL import Image
 current_file = os.path.abspath(__file__)
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
 
-ARTIFACT_DIR = r'C:\Users\emir_\.gemini\antigravity-ide\brain\5ba6371e-e7f8-4738-bb94-e1efd97424b7'
+ARTIFACT_DIR = os.environ.get('AGY_ARTIFACT_DIR')
 OUT_DIR = os.path.join(root_dir, 'results', 'thesis_figures')
 os.makedirs(OUT_DIR, exist_ok=True)
 
+def _pick_file(directory, preferred_name):
+    preferred = os.path.join(directory, preferred_name)
+    if os.path.exists(preferred):
+        return preferred
+    files = sorted([f for f in os.listdir(directory) if f.lower().endswith(('.jpg', '.png'))])
+    return os.path.join(directory, files[0])
+
 # Image paths
-SENES_PATH = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'senescent', 'senescent_MSCs_10005_0.jpg')
-YOUNG_GEN_PATH = os.path.join(root_dir, 'results', 'generated', 'cut_seed_sweep', 'seed_2026', 'rejuv', 'senescent_MSCs_10005_0.jpg')
-YOUNG_REAL_PATH = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'young', 'young_MSCs_10044_625.jpg')
+SENES_PATH = _pick_file(os.path.join(root_dir, 'data', 'processed_v5', 'test', 'senescent'), 'senescent_MSCs_10005_0.jpg')
+YOUNG_GEN_PATH = os.path.join(root_dir, 'results', 'generated', 'cut_seed_sweep', 'seed_2026', 'rejuv', os.path.basename(SENES_PATH))
+YOUNG_REAL_PATH = _pick_file(os.path.join(root_dir, 'data', 'processed_v5', 'test', 'young'), 'young_MSCs_10044_625.jpg')
 
 
 def generate_png_figure():

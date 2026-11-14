@@ -192,7 +192,7 @@ def run_full_population_evaluation(target='ldm', base_dir=root_dir, results_dir=
     if results_dir is None:
         results_dir = os.path.join(base_dir, 'results', 'morphological_validation')
     if artifact_dir is None:
-        artifact_dir = r"C:\Users\emir_\.gemini\antigravity-ide\brain\5ba6371e-e7f8-4738-bb94-e1efd97424b7"
+        artifact_dir = os.environ.get('AGY_ARTIFACT_DIR')
         
     scratch_dir = os.path.join(base_dir, 'scratch')
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -202,7 +202,7 @@ def run_full_population_evaluation(target='ldm', base_dir=root_dir, results_dir=
     print("=" * 80)
     
     # Load Classifier
-    cls_ckpt = os.path.join(base_dir, 'checkpoints', 'classifier', 'classifier_v2.pth')
+    cls_ckpt = os.path.join(base_dir, 'checkpoints', 'classifier', 'classifier_v2_5_resnet.pth')
     classifier = Classifier(output_size=2)
     classifier.load_state_dict(torch.load(cls_ckpt, map_location=device, weights_only=True))
     classifier.to(device)
@@ -306,7 +306,7 @@ def main():
     
     base_dir = root_dir
     results_dir = os.path.join(base_dir, 'results', 'morphological_validation')
-    artifact_dir = r"C:\Users\emir_\.gemini\antigravity-ide\brain\5ba6371e-e7f8-4738-bb94-e1efd97424b7"
+    artifact_dir = os.environ.get('AGY_ARTIFACT_DIR')
     os.makedirs(results_dir, exist_ok=True)
     
     if args.target in ['ldm', 'all']:

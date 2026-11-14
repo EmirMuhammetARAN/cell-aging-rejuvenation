@@ -44,51 +44,20 @@ if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
 from models.ldm.model_v16 import CellLDM_v16, CELL_MSC
+from models.classifier.passage_clock import get_default_v3_5_ckpt, load_passage_clock, predict_passages
 
 dev = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-
-class ConvNeXtMultiTask(nn.Module):
-    def __init__(self):
-        super().__init__()
-        base = models.convnext_tiny(weights=None)
-        self.features = base.features
-        self.avgpool = base.avgpool
-        in_features = base.classifier[2].in_features
-        self.norm = base.classifier[0]
-        self.age_head = nn.Sequential(nn.Flatten(), nn.Linear(in_features, 128), nn.LayerNorm(128),
-                                      nn.GELU(), nn.Dropout(0.3), nn.Linear(128, 1), nn.Sigmoid())
-        self.phase_head = nn.Sequential(nn.Flatten(), nn.Linear(in_features, 128), nn.LayerNorm(128),
-                                        nn.GELU(), nn.Dropout(0.3), nn.Linear(128, 3))
-
-    def forward(self, x):
-        x = self.norm(self.avgpool(self.features(x)))
-        return self.age_head(x).squeeze(1), self.phase_head(x)
+CLOCK_META = {}
 
 
 def load_classifier():
-    cls = ConvNeXtMultiTask().to(dev)
-    ck = torch.load(os.path.join(root_dir, 'deneme', 'checkpoints', 'classifier_v3_convnext_best.pth'), map_location=dev)
-    cls.load_state_dict(ck['model_state_dict'])
-    cls.eval()
+    global CLOCK_META
+    cls, CLOCK_META = load_passage_clock(get_default_v3_5_ckpt(root_dir), device=dev)
     return cls
 
 
-IMNET_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to(dev)
-IMNET_STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to(dev)
-
-
-@torch.no_grad()
-def predict_passages(cls, imgs_01, bs=32):
-    preds = []
-    for i in range(0, len(imgs_01), bs):
-        batch = imgs_01[i:i + bs].to(dev)
-        g = transforms.functional.resize(batch, (224, 224), antialias=True)
-        g = (g - IMNET_MEAN) / IMNET_STD
-        ages, _ = cls(g)
-        p = ages.cpu().numpy() * 40.0 + 1.0
-        preds.extend(p.tolist())
-    return np.array(preds)
+def predict_passages_batch(cls, imgs_01, bs=48):
+    return predict_passages(cls, imgs_01, device=dev, bs=bs, meta=CLOCK_META)
 
 
 def main():
@@ -118,8 +87,8 @@ def main():
     cls = load_classifier()
 
     # Dataset paths
-    y_test_dir = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'young')
-    s_test_dir = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'senescent')
+    y_test_dir = os.path.join(root_dir, 'data', 'processed_v5', 'test', 'young')
+    s_test_dir = os.path.join(root_dir, 'data', 'processed_v5', 'test', 'senescent')
     y_files = sorted([os.path.join(y_test_dir, f) for f in os.listdir(y_test_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
     s_files = sorted([os.path.join(s_test_dir, f) for f in os.listdir(s_test_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
 
@@ -153,7 +122,7 @@ def main():
         batch_tensors = torch.stack([TF.to_tensor(Image.open(f).convert('RGB')) for f in batch_paths])
         
         # Passage and brightness of real input
-        preds_in = predict_passages(cls, batch_tensors)
+        preds_in = predict_passages_batch(cls, batch_tensors)
         bright_in = batch_tensors.mean(dim=(1, 2, 3)).numpy()
         real_s_preds.extend(preds_in.tolist())
         real_s_bright.extend(bright_in.tolist())
@@ -166,7 +135,7 @@ def main():
             out_cpu = out.cpu()
 
         # Passage and brightness of generated rejuvenation
-        preds_out = predict_passages(cls, out_cpu)
+        preds_out = predict_passages_batch(cls, out_cpu)
         bright_out = out_cpu.mean(dim=(1, 2, 3)).numpy()
         p_rejuv_list.extend(preds_out.tolist())
         b_rejuv_list.extend(bright_out.tolist())
@@ -245,7 +214,7 @@ def main():
         batch_tensors = torch.stack([TF.to_tensor(Image.open(f).convert('RGB')) for f in batch_paths])
         
         # Passage and brightness of real input
-        preds_in = predict_passages(cls, batch_tensors)
+        preds_in = predict_passages_batch(cls, batch_tensors)
         bright_in = batch_tensors.mean(dim=(1, 2, 3)).numpy()
         real_y_preds.extend(preds_in.tolist())
         real_y_bright.extend(bright_in.tolist())
@@ -258,7 +227,7 @@ def main():
             out_cpu = out.cpu()
 
         # Passage and brightness of generated aging
-        preds_out = predict_passages(cls, out_cpu)
+        preds_out = predict_passages_batch(cls, out_cpu)
         bright_out = out_cpu.mean(dim=(1, 2, 3)).numpy()
         p_aging_list.extend(preds_out.tolist())
         b_aging_list.extend(bright_out.tolist())

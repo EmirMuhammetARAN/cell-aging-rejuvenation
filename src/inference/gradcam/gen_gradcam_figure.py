@@ -1,6 +1,6 @@
 """
 Preprint / Thesis Figure 4: Explainable AI with Hierarchical LayerCAM (Layer 3 + Layer 4)
-Uses Classifier v2 (ResNet-18, classifier_v2.pth) to visualize subcellular phenotypic attention
+Uses Classifier v2_5 (ResNet-18, classifier_v2_5_resnet.pth) to visualize subcellular phenotypic attention
 across Young and Senescent MSC single-cell crops.
 Outputs:
   - results/thesis_figures/preprint_figure4_gradcam.png
@@ -23,7 +23,7 @@ if root_dir not in sys.path:
 
 from models.classifier.classifier import Classifier
 
-ARTIFACT_DIR = r'C:\Users\emir_\.gemini\antigravity-ide\brain\5ba6371e-e7f8-4738-bb94-e1efd97424b7'
+ARTIFACT_DIR = os.environ.get('AGY_ARTIFACT_DIR')
 
 
 class HierarchicalLayerCAM:
@@ -124,14 +124,14 @@ def get_font(size=14, bold=False):
 
 
 def main():
-    print("[*] Initializing Classifier v2 and Hierarchical LayerCAM (Layer 3 + Layer 4)...")
+    print("[*] Initializing Classifier v2_5 and Hierarchical LayerCAM (Layer 3 + Layer 4)...")
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     classifier = Classifier(output_size=2).to(device)
-    ckpt_path = os.path.join(root_dir, 'checkpoints', 'classifier', 'classifier_v2.pth')
+    ckpt_path = os.path.join(root_dir, 'checkpoints', 'classifier', 'classifier_v2_5_resnet.pth')
     classifier.load_state_dict(torch.load(ckpt_path, map_location=device))
     classifier.eval()
-    print("    [OK] Loaded checkpoint: checkpoints/classifier/classifier_v2.pth")
+    print("    [OK] Loaded checkpoint: checkpoints/classifier/classifier_v2_5_resnet.pth")
     
     layercam = HierarchicalLayerCAM(classifier)
     
@@ -140,27 +140,39 @@ def main():
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     
-    test_young = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'young')
-    test_senes = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'senescent')
+    test_young = os.path.join(root_dir, 'data', 'processed_v5', 'test', 'young')
+    test_senes = os.path.join(root_dir, 'data', 'processed_v5', 'test', 'senescent')
     
     grid_out_dir = os.path.join(root_dir, 'results', 'gradcam', 'grid')
     thesis_dir = os.path.join(root_dir, 'results', 'thesis_figures')
     os.makedirs(grid_out_dir, exist_ok=True)
     os.makedirs(thesis_dir, exist_ok=True)
     
+    def _select_exemplars(folder, preferred, k=4):
+        existing = [f for f in preferred if os.path.exists(os.path.join(folder, f))]
+        if len(existing) >= k:
+            return existing[:k]
+        all_files = sorted([f for f in os.listdir(folder) if f.lower().endswith(('.jpg', '.png'))])
+        for f in all_files:
+            if f not in existing:
+                existing.append(f)
+            if len(existing) == k:
+                break
+        return existing
+
     # 4 high-confidence young and 4 high-confidence senescent cells
-    selected_young = [
-        'senescent_MSCs_10005_16.jpg',  # Young 86.9%
-        'senescent_MSCs_10005_5.jpg',   # Young 88.2%
-        'senescent_MSCs_10010_39.jpg',  # Young 91.9%
-        'senescent_MSCs_10030_47.jpg',  # Young 93.8%
-    ]
-    selected_senes = [
-        'senescent_MSCs_10005_0.jpg',   # Senes 94.6%
-        'senescent_MSCs_10005_1.jpg',   # Senes 99.9%
-        'senescent_MSCs_10005_10.jpg',  # Senes 99.8%
-        'senescent_MSCs_10005_12.jpg',  # Senes 99.9%
-    ]
+    selected_young = _select_exemplars(test_young, [
+        'senescent_MSCs_10005_16.jpg',
+        'senescent_MSCs_10005_5.jpg',
+        'senescent_MSCs_10010_39.jpg',
+        'senescent_MSCs_10030_47.jpg',
+    ])
+    selected_senes = _select_exemplars(test_senes, [
+        'senescent_MSCs_10005_0.jpg',
+        'senescent_MSCs_10005_1.jpg',
+        'senescent_MSCs_10005_10.jpg',
+        'senescent_MSCs_10005_12.jpg',
+    ])
     
     cell_size = 256
     sub_header_h = 24

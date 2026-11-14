@@ -6,7 +6,7 @@ import random
 from torchvision.transforms import functional as TF
 
 class LDMDataset(Dataset):
-    def __init__(self, root_dir, split='train', transform=None, data_version='processed_v4'):
+    def __init__(self, root_dir, split='train', transform=None, data_version='processed_v5'):
         self.root_dir = root_dir
         self.split = split
         self.transform = transform

@@ -22,8 +22,8 @@ current_file = os.path.abspath(__file__)
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
 
 # Paths
-TEST_YOUNG = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'young')
-TEST_SENES = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'senescent')
+TEST_YOUNG = os.path.join(root_dir, 'data', 'processed_v5', 'test', 'young')
+TEST_SENES = os.path.join(root_dir, 'data', 'processed_v5', 'test', 'senescent')
 
 CYCLEGAN_AGING = os.path.join(root_dir, 'results', 'generated', 'cyclegan_v2_sweep', 'epoch_160', 'aging')
 CYCLEGAN_REJU = os.path.join(root_dir, 'results', 'generated', 'cyclegan_v2_sweep', 'epoch_160', 'rejuvenation')

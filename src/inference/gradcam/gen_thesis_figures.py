@@ -10,11 +10,11 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-ARTIFACT_DIR = r'C:\Users\emir_\.gemini\antigravity-ide\brain\5ba6371e-e7f8-4738-bb94-e1efd97424b7'
+ARTIFACT_DIR = os.environ.get('AGY_ARTIFACT_DIR')
 
 # Paths
-TEST_YOUNG = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'young')
-TEST_SENES = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'senescent')
+TEST_YOUNG = os.path.join(root_dir, 'data', 'processed_v5', 'test', 'young')
+TEST_SENES = os.path.join(root_dir, 'data', 'processed_v5', 'test', 'senescent')
 
 CYCLEGAN_AGING = os.path.join(root_dir, 'results', 'generated', 'cyclegan_seed_sweep', 'seed_2026', 'aging')
 CYCLEGAN_REJU = os.path.join(root_dir, 'results', 'generated', 'cyclegan_seed_sweep', 'seed_2026', 'rejuv')

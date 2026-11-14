@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-Sampling Steps Ablation and Pseudo-Timelapse Analysis (Full Population: N=645)
+Sampling Steps Ablation and Pseudo-Timelapse Analysis (Full Test Population)
 ------------------------------------------------------------------------------
 Proves the 'Single-Step vs Multi-Step Iterative Transport' Hypothesis:
 Evaluates LDM across sampling step counts: N in [1, 2, 5, 10, 25, 50]
-Across all 645 test cells (327 Young aging + 318 Senescent rejuvenation = 3,870 evaluations).
+Across all held-out test cells (Young aging + Senescent rejuvenation).
 
 Quantifies:
 1. Target Classifier Confidence (%) and Phenotypic Accuracy
@@ -39,10 +39,10 @@ from models.classifier.classifier import Classifier
 
 # Set device
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-CHECKPOINT = os.path.join(base_dir, 'checkpoints', 'ldm', 'checkpoint_v12_v4_data_lpips_last.pt')
-CLS_CKPT = os.path.join(base_dir, 'checkpoints', 'classifier', 'classifier_v2.pth')
+CHECKPOINT = os.path.join(base_dir, 'checkpoints', 'ldm', 'checkpoint_v12_v5_data_lpips_last.pt')
+CLS_CKPT = os.path.join(base_dir, 'checkpoints', 'classifier', 'classifier_v2_5_resnet.pth')
 results_dir = os.path.join(base_dir, "results", "morphological_validation")
-artifact_dir = r"C:\Users\emir_\.gemini\antigravity-ide\brain\5ba6371e-e7f8-4738-bb94-e1efd97424b7"
+artifact_dir = os.environ.get('AGY_ARTIFACT_DIR')
 os.makedirs(results_dir, exist_ok=True)
 
 # 1. Load LDM (Identical Architecture to seed_sweep.py)
@@ -84,17 +84,21 @@ cls_transform = transforms.Compose([
 ])
 
 def compute_shannon_entropy(pixels, num_bins=64):
-    if len(pixels) == 0: return 0.0
-    hist, _ = np.histogram(pixels, bins=num_bins, range=(0, 256), density=True)
-    hist = hist[hist > 0]
-    return float(-np.sum(hist * np.log2(hist)))
+    if len(pixels) == 0:
+        return 0.0
+    counts, _ = np.histogram(pixels, bins=num_bins, range=(0, 256))
+    total = counts.sum()
+    if total == 0:
+        return 0.0
+    probs = counts[counts > 0].astype(np.float64) / float(total)
+    return float(-np.sum(probs * np.log2(probs)))
 
 # Exemplar cells for high-res panel
 exemplars = [
-    ('Aging', 'data/processed_v4/test/young', 'senescent_MSCs_10005_13.jpg', 1, 0, 'Senescent', 0.75, 4.0),
-    ('Aging', 'data/processed_v4/test/young', 'young_MSCs_10044_625.jpg', 1, 0, 'Senescent', 0.75, 4.0),
-    ('Rejuvenation', 'data/processed_v4/test/senescent', 'senescent_MSCs_10058_142.jpg', 0, 1, 'Young', 0.65, 3.5),
-    ('Rejuvenation', 'data/processed_v4/test/senescent', 'senescent_MSCs_10090_242.jpg', 0, 1, 'Young', 0.65, 3.5)
+    ('Aging', 'data/processed_v5/test/young', 'senescent_MSCs_10005_13.jpg', 1, 0, 'Senescent', 0.75, 4.0),
+    ('Aging', 'data/processed_v5/test/young', 'young_MSCs_10044_625.jpg', 1, 0, 'Senescent', 0.75, 4.0),
+    ('Rejuvenation', 'data/processed_v5/test/senescent', 'senescent_MSCs_10058_142.jpg', 0, 1, 'Young', 0.65, 3.5),
+    ('Rejuvenation', 'data/processed_v5/test/senescent', 'senescent_MSCs_10090_242.jpg', 0, 1, 'Young', 0.65, 3.5)
 ]
 
 # Steps list
@@ -168,12 +172,12 @@ for task, in_sub, fname, ldm_label, cls_target, target_name, strength, cfg in ex
         })
 
 print("\n" + "=" * 80)
-print("2. RUNNING QUANTITATIVE STEP SWEEP ON FULL TEST POPULATION (N=645 CELL TRANSITIONS)")
+print("2. RUNNING QUANTITATIVE STEP SWEEP ON FULL TEST POPULATION")
 print("=" * 80)
 
 # Full test population
-aging_cohort = sorted(os.listdir(os.path.join(base_dir, 'data/processed_v4/test/young')))
-reju_cohort = sorted(os.listdir(os.path.join(base_dir, 'data/processed_v4/test/senescent')))
+aging_cohort = sorted(os.listdir(os.path.join(base_dir, 'data/processed_v5/test/young')))
+reju_cohort = sorted(os.listdir(os.path.join(base_dir, 'data/processed_v5/test/senescent')))
 
 print(f"[*] Full Population: {len(aging_cohort)} Young (Aging) + {len(reju_cohort)} Senescent (Rejuvenation) = {len(aging_cohort) + len(reju_cohort)} cells")
 
@@ -203,8 +207,8 @@ if os.path.exists(csv_path):
         print(f"[!] Notice when reading existing CSV: {e}")
 
 cohort_tasks = [
-    ('Aging', 'data/processed_v4/test/young', aging_cohort, 1, 0, 0.75, 4.0),
-    ('Rejuvenation', 'data/processed_v4/test/senescent', reju_cohort, 0, 1, 0.65, 3.5)
+    ('Aging', 'data/processed_v5/test/young', aging_cohort, 1, 0, 0.75, 4.0),
+    ('Rejuvenation', 'data/processed_v5/test/senescent', reju_cohort, 0, 1, 0.65, 3.5)
 ]
 
 fieldnames = ['Task', 'Filename', 'Steps', 'Transition_Success', 'Target_Confidence_Pct', 'Shannon_Entropy_bits', 'Deformation_Energy']
@@ -384,8 +388,9 @@ if artifact_dir and os.path.exists(artifact_dir):
     shutil.copy2(out_panel_path, os.path.join(artifact_dir, out_panel_name))
 print(f"[OK] Saved 300 DPI Pseudo-Timelapse Panel: {out_panel_name}")
 
+n_pop = len(aging_cohort) + len(reju_cohort)
 print("\n" + "=" * 80)
-print("4. RENDERING STEP CONVERGENCE STATISTICAL CURVES (FULL POPULATION N=645)")
+print(f"4. RENDERING STEP CONVERGENCE STATISTICAL CURVES (FULL POPULATION N={n_pop})")
 print("=" * 80)
 
 fig, axes = plt.subplots(1, 3, figsize=(18, 5.5), dpi=300)
@@ -416,19 +421,19 @@ for task_name, color in [('Aging', '#3b82f6'), ('Rejuvenation', '#10b981')]:
     # Curve 3: Entropy
     axes[2].plot(step_counts, means_ent, marker='o', linewidth=2.5, color=color, label=f"{task_name} Entropy (H)")
 
-axes[0].set_title("Classifier Transition Confidence vs. Steps (N=645)", fontsize=12, fontweight='bold')
+axes[0].set_title(f"Classifier Transition Confidence vs. Steps (N={n_pop})", fontsize=12, fontweight='bold')
 axes[0].set_xlabel("Diffusion Sampling Steps (N)", fontsize=11)
 axes[0].set_ylabel("ResNet-18 Target Probability (%)", fontsize=11)
 axes[0].set_xticks(step_counts)
 axes[0].legend(fontsize=9.5)
 
-axes[1].set_title("Physical Deformation Energy (|I_N - I_in|) (N=645)", fontsize=12, fontweight='bold')
+axes[1].set_title(f"Physical Deformation Energy (|I_N - I_in|) (N={n_pop})", fontsize=12, fontweight='bold')
 axes[1].set_xlabel("Diffusion Sampling Steps (N)", fontsize=11)
 axes[1].set_ylabel("Mean Absolute Pixel Deformation", fontsize=11)
 axes[1].set_xticks(step_counts)
 axes[1].legend(fontsize=9.5)
 
-axes[2].set_title("Cytoplasmic Entropy Convergence (N=645)", fontsize=12, fontweight='bold')
+axes[2].set_title(f"Cytoplasmic Entropy Convergence (N={n_pop})", fontsize=12, fontweight='bold')
 axes[2].set_xlabel("Diffusion Sampling Steps (N)", fontsize=11)
 axes[2].set_ylabel("Shannon Entropy (bits)", fontsize=11)
 axes[2].set_xticks(step_counts)

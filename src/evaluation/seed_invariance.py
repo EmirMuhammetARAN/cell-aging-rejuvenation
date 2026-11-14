@@ -42,9 +42,13 @@ from models.classifier.classifier import Classifier
 def compute_shannon_entropy(pixels, num_bins=64):
     if len(pixels) == 0:
         return 0.0
-    hist, _ = np.histogram(pixels, bins=num_bins, range=(0, 256), density=True)
-    hist = hist[hist > 0]
-    return float(-np.sum(hist * np.log2(hist)))
+    hist, _ = np.histogram(pixels, bins=num_bins, range=(0, 256))
+    total = hist.sum()
+    if total == 0:
+        return 0.0
+    probs = hist / total
+    probs = probs[probs > 0]
+    return float(-np.sum(probs * np.log2(probs)))
 
 
 def compute_pairwise_ssim(images_gray):
@@ -66,10 +70,10 @@ def run_evaluation(base_dir=root_dir, results_dir=None):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     print("\n" + "=" * 80)
-    print("RUNNING SEED SENSITIVITY & DETERMINISM ANALYSIS (5 SEEDS X 645 CELLS = 3,225 IMAGES)")
+    print(f"RUNNING SEED SENSITIVITY & DETERMINISM ANALYSIS ({len(seeds)} SEEDS)")
     print("=" * 80)
     
-    cls_ckpt = os.path.join(base_dir, 'checkpoints', 'classifier', 'classifier_v2.pth')
+    cls_ckpt = os.path.join(base_dir, 'checkpoints', 'classifier', 'classifier_v2_5_resnet.pth')
     classifier = Classifier(output_size=2)
     classifier.load_state_dict(torch.load(cls_ckpt, map_location=device, weights_only=True))
     classifier.to(device)
@@ -81,8 +85,8 @@ def run_evaluation(base_dir=root_dir, results_dir=None):
     ])
     
     tasks = [
-        ('Aging', 'data/processed_v4/test/young', 'aging', 0, 'Senescent'),
-        ('Rejuvenation', 'data/processed_v4/test/senescent', 'rejuvenation', 1, 'Young')
+        ('Aging', 'data/processed_v5/test/young', 'aging', 0, 'Senescent'),
+        ('Rejuvenation', 'data/processed_v5/test/senescent', 'rejuvenation', 1, 'Young')
     ]
     
     records = []
@@ -175,16 +179,21 @@ def render_panel(base_dir=root_dir, results_dir=None, artifact_dir=None):
     if results_dir is None:
         results_dir = os.path.join(base_dir, "results", "morphological_validation")
     if artifact_dir is None:
-        artifact_dir = r"C:\Users\emir_\.gemini\antigravity-ide\brain\5ba6371e-e7f8-4738-bb94-e1efd97424b7"
+        artifact_dir = os.environ.get('AGY_ARTIFACT_DIR')
         
     seeds = [42, 1024, 2026, 7777, 9999]
     seed_base = os.path.join(base_dir, "results", "generated", "seed_sweep")
     
+    y_dir = os.path.join(base_dir, 'data', 'processed_v5', 'test', 'young')
+    s_dir = os.path.join(base_dir, 'data', 'processed_v5', 'test', 'senescent')
+    y_files = sorted([f for f in os.listdir(y_dir) if f.lower().endswith(('.jpg', '.png'))])
+    s_files = sorted([f for f in os.listdir(s_dir) if f.lower().endswith(('.jpg', '.png'))])
+
     samples = [
-        ('Aging', 'data/processed_v4/test/young', 'senescent_MSCs_10005_13.jpg'),
-        ('Aging', 'data/processed_v4/test/young', 'young_MSCs_10044_625.jpg'),
-        ('Rejuvenation', 'data/processed_v4/test/senescent', 'senescent_MSCs_10058_142.jpg'),
-        ('Rejuvenation', 'data/processed_v4/test/senescent', 'senescent_MSCs_10090_242.jpg')
+        ('Aging', 'data/processed_v5/test/young', y_files[0]),
+        ('Aging', 'data/processed_v5/test/young', y_files[len(y_files) // 2]),
+        ('Rejuvenation', 'data/processed_v5/test/senescent', s_files[0]),
+        ('Rejuvenation', 'data/processed_v5/test/senescent', s_files[len(s_files) // 2]),
     ]
     
     metrics_csv = os.path.join(results_dir, "seed_sensitivity_metrics.csv")

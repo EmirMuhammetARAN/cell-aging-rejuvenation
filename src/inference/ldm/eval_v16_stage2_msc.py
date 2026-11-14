@@ -1,8 +1,8 @@
 """
 LDM v16 Stage 2 Evaluation: Cross-Cell-Type Pseudo-Passage MSC Control
 ======================================================================
-Judge: ConvNeXt-Tiny classifier v3 (deneme/checkpoints/classifier_v3_convnext_best.pth)
-Evaluates on held-out MSC test set (data/processed_v4/test/young and test/senescent):
+Judge: PassageClock v3.5 (checkpoints/classifier/classifier_v3_5_convnext.pth)
+Evaluates on held-out MSC test set (data/processed_v5/test/young and test/senescent):
   A. Continuous Noise -> Image synthesis (paired seeds across passages P=6..38)
   B. SDEdit Real-Cell Aging Translation (Young MSC test -> older passages)
   C. SDEdit Real-Cell Rejuvenation Translation (Senescent MSC test -> younger passages)
@@ -46,44 +46,15 @@ if root_dir not in sys.path:
 
 from models.ldm.model_v16 import CellLDM_v16
 from models.ldm.dataset_v16 import CELL_MSC
+from models.classifier.passage_clock import get_default_v3_5_ckpt, load_passage_clock, predict_passages
 
-CLS_CKPT = os.path.join(root_dir, 'deneme', 'checkpoints', 'classifier_v3_convnext_best.pth')
-IMNET_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
-IMNET_STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
-
+CLS_CKPT = get_default_v3_5_ckpt(root_dir)
+CLOCK_META = {}
 SWEEP_PASSAGES = [6, 10, 14, 18, 22, 26, 30, 34, 38]
 
 
-class ConvNeXtMultiTask(nn.Module):
-    def __init__(self):
-        super().__init__()
-        base = models.convnext_tiny(weights=None)
-        self.features = base.features
-        self.avgpool = base.avgpool
-        in_features = base.classifier[2].in_features
-        self.norm = base.classifier[0]
-        self.age_head = nn.Sequential(nn.Flatten(), nn.Linear(in_features, 128), nn.LayerNorm(128),
-                                      nn.GELU(), nn.Dropout(0.3), nn.Linear(128, 1), nn.Sigmoid())
-        self.phase_head = nn.Sequential(nn.Flatten(), nn.Linear(in_features, 128), nn.LayerNorm(128),
-                                        nn.GELU(), nn.Dropout(0.3), nn.Linear(128, 3))
-
-    def forward(self, x):
-        x = self.norm(self.avgpool(self.features(x)))
-        return self.age_head(x).squeeze(1), self.phase_head(x)
-
-
-@torch.no_grad()
-def predict_passage(cls, imgs01, device, bs=32):
-    """imgs01: (N,3,H,W) in [0,1] on CPU. Returns predicted passage (N,) = score*40+1."""
-    out = []
-    for i in range(0, len(imgs01), bs):
-        x = imgs01[i:i + bs].to(device).float()
-        g = (0.299 * x[:, 0:1] + 0.587 * x[:, 1:2] + 0.114 * x[:, 2:3]).repeat(1, 3, 1, 1)
-        g = F.interpolate(g, size=(224, 224), mode='bilinear', antialias=True, align_corners=False)
-        g = (g - IMNET_MEAN.to(device)) / IMNET_STD.to(device)
-        age, _ = cls(g)
-        out.append(age.float().cpu().numpy() * 40.0 + 1.0)
-    return np.concatenate(out)
+def predict_passage(cls, imgs01, device, bs=48):
+    return predict_passages(cls, imgs01, device=device, bs=bs, meta=CLOCK_META or None)
 
 
 def load_test_image(path):
@@ -161,11 +132,9 @@ def main():
     print(f"  N_gen: {args.n_gen} | Guidance: {args.guidance_scale} | SDEdit strength: {args.sdedit_strength}\n{'='*78}\n")
 
     # Load Classifier Judge
-    print("[1/5] Loading ConvNeXt Classifier Judge...")
-    cls = ConvNeXtMultiTask().to(device)
-    ck = torch.load(CLS_CKPT, map_location=device)
-    cls.load_state_dict(ck['model_state_dict'])
-    cls.eval()
+    print("[1/5] Loading PassageClock v3.5 Judge...")
+    global CLOCK_META
+    cls, CLOCK_META = load_passage_clock(CLS_CKPT, device=device)
 
     # Load Model
     print("[2/5] Loading LDM v16 Generator...")
@@ -176,8 +145,8 @@ def main():
     model.eval()
 
     # Load Real MSC Test Cohort
-    test_young_dir = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'young')
-    test_senes_dir = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'senescent')
+    test_young_dir = os.path.join(root_dir, 'data', 'processed_v5', 'test', 'young')
+    test_senes_dir = os.path.join(root_dir, 'data', 'processed_v5', 'test', 'senescent')
     young_files = sorted([os.path.join(test_young_dir, f) for f in os.listdir(test_young_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
     senes_files = sorted([os.path.join(test_senes_dir, f) for f in os.listdir(test_senes_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
     print(f"  Loaded {len(young_files)} real young test crops and {len(senes_files)} real senescent test crops.")
@@ -395,8 +364,8 @@ def main():
     report_content = f"""# LDM v16 Stage 2 (MSC Fine-Tuning) Evaluation Report
 
 **Checkpoint:** `{os.path.basename(ckpt_path)}`  
-**Dataset:** 645 Independent Held-Out MSC Test Images (`data/processed_v4/test`)  
-**Judge Model:** ConvNeXt-Tiny Multi-Task Classifier v3 (`deneme/checkpoints/classifier_v3_convnext_best.pth`)  
+**Dataset:** {len(young_files) + len(senes_files)} Independent Held-Out MSC Test Images (`data/processed_v5/test`)  
+**Judge Model:** PassageClock v3.5 (`checkpoints/classifier/classifier_v3_5_convnext.pth`)  
 **Date:** {time.strftime('%Y-%m-%d %H:%M:%S')}  
 
 ---

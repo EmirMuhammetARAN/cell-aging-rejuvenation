@@ -38,8 +38,8 @@ torch.backends.cuda.matmul.allow_tf32 = True
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 # Paths
-TEST_YOUNG = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'young')
-TEST_SENES = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'senescent')
+TEST_YOUNG = os.path.join(root_dir, 'data', 'processed_v5', 'val', 'young')
+TEST_SENES = os.path.join(root_dir, 'data', 'processed_v5', 'val', 'senescent')
 CHECKPOINT_DIR = os.path.join(root_dir, 'checkpoints', 'cut')
 OUTPUT_BASE = os.path.join(root_dir, 'results', 'generated', 'cut_sweep')
 os.makedirs(OUTPUT_BASE, exist_ok=True)
@@ -71,9 +71,9 @@ def main():
     print(f"Discovered {len(epochs)} checkpoints: {epochs}")
     print(f"Test cohort: Aging = {len(os.listdir(TEST_YOUNG))} cells, Rejuvenation = {len(os.listdir(TEST_SENES))} cells")
 
-    # Load Classifier v2 once
+    # Load Classifier v2_5 once
     classifier = Classifier(output_size=2).to(DEVICE)
-    cls_path = os.path.join(root_dir, 'checkpoints', 'classifier', 'classifier_v2.pth')
+    cls_path = os.path.join(root_dir, 'checkpoints', 'classifier', 'classifier_v2_5_resnet.pth')
     classifier.load_state_dict(torch.load(cls_path, map_location=DEVICE))
     classifier.eval()
     print("[OK] Loaded ResNet-18 Classifier.")

@@ -31,15 +31,15 @@ from models.classifier.classifier import Classifier
 from src.evaluation.shield3_layercam import HierarchicalLayerCAM, compute_alignment_metrics, create_composite_overlay
 
 results_dir = os.path.join(base_dir, 'results', 'morphological_validation')
-artifact_dir = r"C:\Users\emir_\.gemini\antigravity-ide\brain\5ba6371e-e7f8-4738-bb94-e1efd97424b7"
+artifact_dir = os.environ.get('AGY_ARTIFACT_DIR')
 scratch_dir = os.path.join(base_dir, 'scratch')
 
 # Image paths
-y_in_dir = os.path.join(base_dir, "data", "processed_v4", "test", "young")
+y_in_dir = os.path.join(base_dir, "data", "processed_v5", "test", "young")
 ag_out_dir = os.path.join(base_dir, "results", "generated", "seed_sweep", "seed_2026", "aging")
 cg_ag_dir = os.path.join(base_dir, "results", "generated", "cyclegan_v2_sweep", "epoch_160", "aging")
 
-s_in_dir = os.path.join(base_dir, "data", "processed_v4", "test", "senescent")
+s_in_dir = os.path.join(base_dir, "data", "processed_v5", "test", "senescent")
 re_out_dir = os.path.join(base_dir, "results", "generated", "seed_sweep", "seed_2026", "rejuv")
 cg_re_dir = os.path.join(base_dir, "results", "generated", "cyclegan_v2_sweep", "epoch_160", "rejuvenation")
 
@@ -61,7 +61,7 @@ with open(os.path.join(results_dir, "full_test_layercam_alignment.csv"), 'r') as
 
 # Classifier & LayerCAM
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-ckpt_path = os.path.join(base_dir, 'checkpoints', 'classifier', 'classifier_v2.pth')
+ckpt_path = os.path.join(base_dir, 'checkpoints', 'classifier', 'classifier_v2_5_resnet.pth')
 classifier = Classifier(output_size=2)
 classifier.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=True))
 classifier.to(device)

@@ -39,9 +39,12 @@ def compute_shannon_entropy(pixels, num_bins=64):
     """
     if len(pixels) == 0:
         return 0.0
-    hist, _ = np.histogram(pixels, bins=num_bins, range=(0, 256), density=True)
-    hist = hist[hist > 0]
-    return float(-np.sum(hist * np.log2(hist)))
+    counts, _ = np.histogram(pixels, bins=num_bins, range=(0, 256))
+    total = counts.sum()
+    if total == 0:
+        return 0.0
+    probs = counts[counts > 0].astype(np.float64) / float(total)
+    return float(-np.sum(probs * np.log2(probs)))
 
 
 def extract_cytoplasmic_texture(img_rgb, mask, apply_erosion=True, erosion_kernel_size=7):
@@ -96,7 +99,7 @@ def extract_cytoplasmic_texture(img_rgb, mask, apply_erosion=True, erosion_kerne
 
 def run_full_population_evaluation(base_dir, results_dir, artifact_dir):
     print("\n" + "=" * 80)
-    print("RUNNING SHIELD 2: FULL POPULATION CYTOPLASMIC TEXTURE EVALUATION (N = 645)")
+    print("RUNNING SHIELD 2: FULL POPULATION CYTOPLASMIC TEXTURE EVALUATION")
     print("=" * 80)
     
     scratch_dir = os.path.join(root_dir, 'scratch')
@@ -116,13 +119,13 @@ def run_full_population_evaluation(base_dir, results_dir, artifact_dir):
     tasks = [
         {
             'task': 'aging',
-            'input_dir': os.path.join(base_dir, 'data/processed_v4/test/young'),
+            'input_dir': os.path.join(base_dir, 'data/processed_v5/test/young'),
             'ldm_dir': os.path.join(base_dir, 'results/generated/seed_sweep/seed_2026/aging'),
             'masks': mrcnn_masks_aging
         },
         {
             'task': 'rejuvenation',
-            'input_dir': os.path.join(base_dir, 'data/processed_v4/test/senescent'),
+            'input_dir': os.path.join(base_dir, 'data/processed_v5/test/senescent'),
             'ldm_dir': os.path.join(base_dir, 'results/generated/seed_sweep/seed_2026/rejuv'),
             'masks': mrcnn_masks_reju
         }
@@ -231,7 +234,7 @@ Method: 7x7 Elliptical Morphological Erosion on Mask R-CNN Ground-Truth Masks
     ax_a.set_xticks([1, 2])
     ax_a.set_xticklabels(['Control Young\n(Input)', 'LDM Senescent\n(Output)'], fontweight='bold')
     ax_a.set_ylabel('Shannon Entropy (bits)', fontweight='bold')
-    ax_a.set_title('A) Young -> Senescent Cytoplasmic Entropy (p < 1e-70)', fontweight='bold', fontsize=12)
+    ax_a.set_title(f'A) Young -> Senescent Cytoplasmic Entropy (p = {ttest_aging_h.pvalue:.2e})', fontweight='bold', fontsize=12)
     
     # Panel B: Rejuvenation Entropy
     ax_b = axes[0, 1]
@@ -239,7 +242,7 @@ Method: 7x7 Elliptical Morphological Erosion on Mask R-CNN Ground-Truth Masks
     ax_b.set_xticks([1, 2])
     ax_b.set_xticklabels(['Control Senescent\n(Input)', 'LDM Rejuvenated\n(Output)'], fontweight='bold')
     ax_b.set_ylabel('Shannon Entropy (bits)', fontweight='bold')
-    ax_b.set_title('B) Senescent -> Young Cytoplasmic Entropy (p < 1e-25)', fontweight='bold', fontsize=12)
+    ax_b.set_title(f'B) Senescent -> Young Cytoplasmic Entropy (p = {ttest_reju_h.pvalue:.2e})', fontweight='bold', fontsize=12)
     
     # Panel C: Aging Contrast
     ax_c = axes[1, 0]
@@ -257,7 +260,7 @@ Method: 7x7 Elliptical Morphological Erosion on Mask R-CNN Ground-Truth Masks
     ax_d.set_ylabel('GLCM Contrast', fontweight='bold')
     ax_d.set_title('D) Rejuvenation GLCM High-Frequency Contrast', fontweight='bold', fontsize=12)
     
-    plt.suptitle('Shield 2: Intra-Cellular Cytoplasmic Texture & Shannon Entropy Distribution (N = 645)', fontsize=15, fontweight='bold', y=0.995)
+    plt.suptitle(f'Shield 2: Intra-Cellular Cytoplasmic Texture & Shannon Entropy Distribution (N = {len(records)})', fontsize=15, fontweight='bold', y=0.995)
     out_fig = os.path.join(results_dir, 'figure_full_population_texture_violin.png')
     plt.savefig(out_fig, bbox_inches='tight', dpi=300)
     plt.close()
@@ -269,7 +272,7 @@ Method: 7x7 Elliptical Morphological Erosion on Mask R-CNN Ground-Truth Masks
 def main():
     base_dir = root_dir
     results_dir = os.path.join(base_dir, 'results', 'morphological_validation')
-    artifact_dir = r"C:\Users\emir_\.gemini\antigravity-ide\brain\5ba6371e-e7f8-4738-bb94-e1efd97424b7"
+    artifact_dir = os.environ.get('AGY_ARTIFACT_DIR')
     os.makedirs(results_dir, exist_ok=True)
     
     run_full_population_evaluation(base_dir, results_dir, artifact_dir)

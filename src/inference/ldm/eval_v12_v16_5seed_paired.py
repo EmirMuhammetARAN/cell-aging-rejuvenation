@@ -5,7 +5,7 @@ Executes the strictly matched, zero-leakage evaluation across all 5 seeds (42, 1
 plus the Phase 3 Trajectory Control Ablation on Seed 2026.
 
 Strict Protocol Enforcement:
-  1. Identical Test Set: data/processed_v4/test (Young N=327, Senescent N=318), 100% blinded during training.
+  1. Identical Test Set: data/processed_v5/test, 100% blinded during training.
   2. Identical Sampling Protocol:
      - Batch Size = 8, sorted() filenames, 100 DDIM steps
      - Full FP32 deterministic inference (torch.backends.cudnn.deterministic = True)
@@ -81,11 +81,11 @@ AGING_CFG = 4.0
 REJUV_STRENGTH = 0.65
 REJUV_CFG = 3.5
 
-TEST_YOUNG = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'young')
-TEST_SENES = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'senescent')
-V12_CKPT_PATH = os.path.join(root_dir, 'checkpoints', 'ldm', 'checkpoint_v12_v4_data_lpips_last.pt')
+TEST_YOUNG = os.path.join(root_dir, 'data', 'processed_v5', 'test', 'young')
+TEST_SENES = os.path.join(root_dir, 'data', 'processed_v5', 'test', 'senescent')
+V12_CKPT_PATH = os.path.join(root_dir, 'checkpoints', 'ldm', 'checkpoint_v12_v5_data_lpips_last.pt')
 V16_CKPT_PATH = os.path.join(root_dir, 'checkpoints', 'ldm', 'best_model_v16_stage2_msc.pt')
-CLASSIFIER_CKPT = os.path.join(root_dir, 'checkpoints', 'classifier', 'classifier_v2.pth')
+CLASSIFIER_CKPT = os.path.join(root_dir, 'checkpoints', 'classifier', 'classifier_v2_5_resnet.pth')
 
 
 def set_seed(seed):

@@ -6,6 +6,10 @@ os.environ["HF_DATASETS_OFFLINE"] = "0"
 os.environ["CUDA_LAUNCH_BLOCKING"] = "0"
 os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4294967296"
 
+import csv
+import random
+import time
+import numpy as np
 import torch
 from torchvision import transforms
 from torchvision.utils import save_image
@@ -27,10 +31,23 @@ torch.backends.cudnn.allow_tf32 = True
 torch.set_float32_matmul_precision('medium')
 torch._dynamo.config.cache_size_limit = 64
 
-# ===== EXPERIMENT CONFIG =====
-EXPERIMENT_NAME = "v12_v4_data"
-# =============================
+def set_seed(seed=2026):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % (2 ** 32)
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
+
+EXPERIMENT_NAME = "v12_v5_data"
 if __name__ == "__main__":
+    SEED = 2026
+    set_seed(SEED)
 
     BATCH_SIZE = 4  
     VAL_BATCH_SIZE = 1
@@ -83,7 +100,6 @@ if __name__ == "__main__":
     best_val_loss = float('inf')
     start_epoch = 0
 
-    # En son checkpoint'i bul
     import glob
     import re
     
@@ -103,7 +119,6 @@ if __name__ == "__main__":
 
     best_model_path = os.path.join(CHECKPOINT_DIR, f'best_model_{EXPERIMENT_NAME}.pt')
     
-    # Eğer en son checkpoint varsa onu, yoksa best_model'i kullan
     resume_path = latest_checkpoint if latest_checkpoint else best_model_path
 
     if os.path.exists(resume_path):
@@ -136,20 +151,30 @@ if __name__ == "__main__":
         gc.collect()
         print(f"Resumed from epoch {start_epoch}, best_val_loss: {best_val_loss:.4f}")
     else:
-        print("Starting from scratch (no checkpoint found for v10_custom_vae_lpips)")
+        print(f"Starting from scratch (no checkpoint found for {EXPERIMENT_NAME})")
 
-    train_dataset = LDMDataset(root_dir=root_dir, split='train', transform=train_transform, data_version='processed_v4')
-    val_dataset = LDMDataset(root_dir=root_dir, split='test', transform=val_transform, data_version='processed_v4')
+    train_dataset = LDMDataset(root_dir=root_dir, split='train', transform=train_transform, data_version='processed_v5')
+    val_dataset = LDMDataset(root_dir=root_dir, split='val', transform=val_transform, data_version='processed_v5')
 
     young_count = train_dataset.labels.count(0)
     senes_count = train_dataset.labels.count(1)
     class_weights = {0: 1.0 / young_count, 1: 1.0 / senes_count}
     sample_weights = [class_weights[l] for l in train_dataset.labels]
-    sampler = WeightedRandomSampler(sample_weights, len(sample_weights), replacement=True)
-    train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, sampler=sampler, num_workers=0)
-    val_dataloader = DataLoader(val_dataset, batch_size=VAL_BATCH_SIZE, shuffle=False, num_workers=0)
+    sampler_gen = torch.Generator().manual_seed(SEED)
+    sampler = WeightedRandomSampler(sample_weights, len(sample_weights), replacement=True, generator=sampler_gen)
+    train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, sampler=sampler,
+                                  num_workers=4, pin_memory=True, persistent_workers=True,
+                                  worker_init_fn=seed_worker)
+    val_dataloader = DataLoader(val_dataset, batch_size=VAL_BATCH_SIZE, shuffle=False,
+                                num_workers=2, pin_memory=True)
+
+    log_path = os.path.join(RESULTS_DIR, 'train_log.csv')
+    if not os.path.exists(log_path):
+        with open(log_path, 'w', newline='', encoding='utf-8') as f:
+            csv.writer(f).writerow(['epoch', 'train_loss', 'val_loss', 'lr', 'epoch_time_s'])
 
     for epoch in range(start_epoch, NUM_EPOCHS):
+        t0 = time.time()
         model.unet.train()
         train_loss_sum = 0.0
         train_steps = 0
@@ -186,6 +211,9 @@ if __name__ == "__main__":
 
         lr_scheduler.step()
         avg_train_loss = train_loss_sum / train_steps
+        ep_time = time.time() - t0
+        cur_lr = optimizer.param_groups[0]['lr']
+        avg_val_loss = float('nan')
 
         if (epoch + 1) % VAL_FREQ == 0:
             model.unet.eval()
@@ -201,7 +229,7 @@ if __name__ == "__main__":
                     val_steps += 1
 
             avg_val_loss = val_loss_sum / val_steps
-            print(f"Epoch {epoch+1} | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
+            print(f"Epoch {epoch+1} | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | LR: {cur_lr:.2e} ({ep_time:.1f}s)")
 
             model.unet.eval()
             use_ema = (epoch + 1) >= 10
@@ -231,12 +259,12 @@ if __name__ == "__main__":
 
                 if young_img is not None and senescent_img is not None:
                     target_senes = torch.ones(1, dtype=torch.long, device=DEVICE)
-                    # 3. DEĞİŞİKLİK: AGING ŞAMPİYON AYARLARI (strength 0.70, cfg 4.0)
+                    # Aging sampling config (strength 0.70, cfg 4.0)
                     translated_senes = model.translate(young_img, target_senes, strength=0.70, use_ema=use_ema, guidance_scale=4.0).cpu()
                     torch.cuda.empty_cache()
 
                     target_young = torch.zeros(1, dtype=torch.long, device=DEVICE)
-                    # 3. DEĞİŞİKLİK: REJUVENATION ŞAMPİYON AYARLARI (strength 0.65, cfg 3.0)
+                    # Rejuvenation sampling config (strength 0.65, cfg 3.0)
                     translated_young = model.translate(senescent_img, target_young, strength=0.65, use_ema=use_ema, guidance_scale=3.0).cpu()
                     torch.cuda.empty_cache()
 
@@ -268,7 +296,10 @@ if __name__ == "__main__":
                 }, os.path.join(CHECKPOINT_DIR, f'best_model_{EXPERIMENT_NAME}.pt'))
                 print(f"  ✓ Best model saved (val_loss: {avg_val_loss:.4f})")
         else:
-            print(f"Epoch {epoch+1} | Train Loss: {avg_train_loss:.4f}")
+            print(f"Epoch {epoch+1} | Train Loss: {avg_train_loss:.4f} | LR: {cur_lr:.2e} ({ep_time:.1f}s)")
+
+        with open(log_path, 'a', newline='', encoding='utf-8') as f:
+            csv.writer(f).writerow([epoch + 1, f"{avg_train_loss:.5f}", f"{avg_val_loss:.5f}", f"{cur_lr:.3e}", f"{ep_time:.1f}"])
 
         if (epoch + 1) % 5 == 0:
             ckpt_path = os.path.join(CHECKPOINT_DIR, f'checkpoint_{EXPERIMENT_NAME}_epoch_{epoch+1}.pt')

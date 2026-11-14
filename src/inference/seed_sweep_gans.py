@@ -53,9 +53,9 @@ DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 SEEDS = [42, 1024, 2026, 7777, 9999]
 
 # Paths
-TEST_YOUNG = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'young')
-TEST_SENES = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'senescent')
-CLASSIFIER_CKPT = os.path.join(root_dir, 'checkpoints', 'classifier', 'classifier_v2.pth')
+TEST_YOUNG = os.path.join(root_dir, 'data', 'processed_v5', 'test', 'young')
+TEST_SENES = os.path.join(root_dir, 'data', 'processed_v5', 'test', 'senescent')
+CLASSIFIER_CKPT = os.path.join(root_dir, 'checkpoints', 'classifier', 'classifier_v2_5_resnet.pth')
 
 CUT_CKPT = os.path.join(root_dir, 'checkpoints', 'cut', 'cut_epoch_200.pth')
 CYCLEGAN_CKPT = os.path.join(root_dir, 'checkpoints', 'cyclegan', 'cyclegan_v2_epoch_160.pth')

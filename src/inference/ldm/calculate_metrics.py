@@ -13,9 +13,9 @@ sys.path.insert(0, root_dir)
 from models.classifier.classifier import Classifier
 
 RESULTS_DIR = os.path.join(root_dir, 'results', 'generated', 'checkpoint_comparison_lpips')
-TEST_YOUNG_DIR = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'young')
-TEST_SENESCENT_DIR = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'senescent')
-CLASSIFIER_CKPT = os.path.join(root_dir, 'checkpoints', 'classifier', 'classifier_v2.pth')
+TEST_YOUNG_DIR = os.path.join(root_dir, 'data', 'processed_v5', 'test', 'young')
+TEST_SENESCENT_DIR = os.path.join(root_dir, 'data', 'processed_v5', 'test', 'senescent')
+CLASSIFIER_CKPT = os.path.join(root_dir, 'checkpoints', 'classifier', 'classifier_v2_5_resnet.pth')
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -55,7 +55,7 @@ def calculate_classifier_score(img_dir, target_label):
     """
     Belirli bir klasördeki resimleri okur ve classifier'ın bu resimlerin yüzde kaçını 
     target_label (istenen sınıf) olarak tahmin ettiğini döndürür.
-    target_label = 1 (Aging için), target_label = 0 (Rejuv için)
+    target_label = 0 (Aging -> Senescent), target_label = 1 (Rejuv -> Young)
     """
     if classifier_model is None:
         return 0.0

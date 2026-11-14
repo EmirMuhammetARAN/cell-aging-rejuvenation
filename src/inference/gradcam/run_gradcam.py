@@ -102,7 +102,7 @@ if __name__ == "__main__":
     
     # Sınıflandırıcıyı yükle
     classifier = Classifier(output_size=2)
-    ckpt_path = os.path.join(root_dir, 'checkpoints', 'classifier', 'classifier_v2.pth')
+    ckpt_path = os.path.join(root_dir, 'checkpoints', 'classifier', 'classifier_v2_5_resnet.pth')
     classifier.load_state_dict(torch.load(ckpt_path, map_location='cpu'))
     classifier.to(DEVICE)
     classifier.eval()
@@ -118,8 +118,8 @@ if __name__ == "__main__":
     ])
     
     # Test verilerini yükle
-    test_young = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'young')
-    test_senes = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'senescent')
+    test_young = os.path.join(root_dir, 'data', 'processed_v5', 'test', 'young')
+    test_senes = os.path.join(root_dir, 'data', 'processed_v5', 'test', 'senescent')
     
     all_results = []
     

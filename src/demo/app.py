@@ -20,8 +20,8 @@ from models.classifier.classifier import Classifier
 
 # ===== CONFIG =====
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-CHECKPOINT = os.path.join(root_dir, 'checkpoints', 'ldm', 'checkpoint_v12_v4_data_lpips_last.pt')
-CLASSIFIER_PATH = os.path.join(root_dir, 'checkpoints', 'classifier', 'classifier_v2.pth')
+CHECKPOINT = os.path.join(root_dir, 'checkpoints', 'ldm', 'checkpoint_v12_v5_data_lpips_last.pt')
+CLASSIFIER_PATH = os.path.join(root_dir, 'checkpoints', 'classifier', 'classifier_v2_5_resnet.pth')
 CLASS_NAMES = {0: 'Senescent', 1: 'Young'}
 
 # ===== MODEL LOADING =====
@@ -265,7 +265,7 @@ with gr.Blocks(title="Cell Aging & Rejuvenation - AI Demo") as demo:
             )
     
     # Example images
-    example_dir = os.path.join(root_dir, 'data', 'processed_v4', 'test')
+    example_dir = os.path.join(root_dir, 'data', 'processed_v5', 'test')
     young_examples = [os.path.join(example_dir, 'young', f) for f in sorted(os.listdir(os.path.join(example_dir, 'young')))[:3]]
     senes_examples = [os.path.join(example_dir, 'senescent', f) for f in sorted(os.listdir(os.path.join(example_dir, 'senescent')))[:3]]
 

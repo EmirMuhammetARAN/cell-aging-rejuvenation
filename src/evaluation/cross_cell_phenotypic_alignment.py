@@ -516,7 +516,7 @@ def main():
                       passage_summary['proj_mean'] - passage_summary['proj_std'],
                       passage_summary['proj_mean'] + passage_summary['proj_std'],
                       color='#41b6c4', alpha=0.25)
-    ax_e.set_title(f"E. Continuous Lifespan Trajectory (v13 Proof)\nSpearman r_s = {spearman_proj:.3f} (p < 1e-15)", fontsize=12, fontweight='bold', pad=10)
+    ax_e.set_title(f"E. Continuous Lifespan Trajectory (v13 Proof)\nSpearman r_s = {spearman_proj:.3f} (p = {sp_p:.2e})", fontsize=12, fontweight='bold', pad=10)
     ax_e.set_xlabel("Replicative Passage Number (P1 to P42)", fontsize=10)
     ax_e.set_ylabel("MSC Aging Axis Projection Score", fontsize=10)
     ax_e.legend(loc='upper left', frameon=True, fontsize=8)

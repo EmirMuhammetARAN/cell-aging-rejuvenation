@@ -28,8 +28,8 @@ root_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 # Test source ground truth cohorts
-TEST_YOUNG = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'young')
-TEST_SENES = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'senescent')
+TEST_YOUNG = os.path.join(root_dir, 'data', 'processed_v5', 'test', 'young')
+TEST_SENES = os.path.join(root_dir, 'data', 'processed_v5', 'test', 'senescent')
 
 # Model output paths
 MODELS = {

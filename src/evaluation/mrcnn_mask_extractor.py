@@ -115,8 +115,8 @@ def main():
 
     # Input test datasets (Young & Senescent)
     if args.target in ['input', 'all']:
-        young_dir = os.path.join(base_dir, "data", "processed_v4", "test", "young")
-        sen_dir = os.path.join(base_dir, "data", "processed_v4", "test", "senescent")
+        young_dir = os.path.join(base_dir, "data", "processed_v5", "test", "young")
+        sen_dir = os.path.join(base_dir, "data", "processed_v5", "test", "senescent")
         extract_masks_for_dataset(model, young_dir, os.path.join(scratch_dir, "mrcnn_masks_input_young.npy"))
         extract_masks_for_dataset(model, sen_dir, os.path.join(scratch_dir, "mrcnn_masks_input_senescent.npy"))
     

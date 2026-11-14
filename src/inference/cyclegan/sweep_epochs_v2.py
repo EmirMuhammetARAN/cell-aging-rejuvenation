@@ -17,9 +17,9 @@ from models.classifier.classifier import Classifier
 torch.backends.cudnn.benchmark = True
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-TEST_YOUNG = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'young')
-TEST_SENES = os.path.join(root_dir, 'data', 'processed_v4', 'test', 'senescent')
-CHECKPOINT_DIR = os.path.join(root_dir, 'checkpoints')
+TEST_YOUNG = os.path.join(root_dir, 'data', 'processed_v5', 'val', 'young')
+TEST_SENES = os.path.join(root_dir, 'data', 'processed_v5', 'val', 'senescent')
+CHECKPOINT_DIR = os.path.join(root_dir, 'checkpoints', 'cyclegan')
 OUTPUT_BASE = os.path.join(root_dir, 'results', 'generated', 'cyclegan_v2_sweep')
 
 transform = transforms.Compose([
@@ -44,7 +44,7 @@ print(f"{'='*70}")
 
 # Load classifier once
 classifier = Classifier(output_size=2)
-classifier.load_state_dict(torch.load(os.path.join(root_dir, 'checkpoints', 'classifier', 'classifier_v2.pth')))
+classifier.load_state_dict(torch.load(os.path.join(root_dir, 'checkpoints', 'classifier', 'classifier_v2_5_resnet.pth')))
 classifier.to(DEVICE); classifier.eval()
 
 young_files = sorted(os.listdir(TEST_YOUNG))
